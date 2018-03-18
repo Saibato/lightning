@@ -704,9 +704,9 @@ static void send_node_announcement(struct daemon *daemon)
 }
 
 /* Returns error if we should send an error. */
-static void handle_gossip_msg(struct peer *peer, u8 *msg)
+static u8 *handle_gossip_msg(struct daemon *daemon, const u8 *msg)
 {
-	struct routing_state *rstate = peer->daemon->rstate;
+	struct routing_state *rstate = daemon->rstate;
 	int t = fromwire_peektype(msg);
 	u8 *err;
 
@@ -716,9 +716,9 @@ static void handle_gossip_msg(struct peer *peer, u8 *msg)
 		/* If it's OK, tells us the short_channel_id to lookup */
 		err = handle_channel_announcement(rstate, msg, &scid);
 		if (err)
-			queue_peer_msg(peer, take(err));
+			return err;
 		else if (scid)
-			daemon_conn_send(&peer->daemon->master,
+			daemon_conn_send(&daemon->master,
 					 take(towire_gossip_get_txout(NULL,
 								      scid)));
 		break;
@@ -727,15 +727,18 @@ static void handle_gossip_msg(struct peer *peer, u8 *msg)
 	case WIRE_NODE_ANNOUNCEMENT:
 		err = handle_node_announcement(rstate, msg);
 		if (err)
-			queue_peer_msg(peer, take(err));
+			return err;
 		break;
 
 	case WIRE_CHANNEL_UPDATE:
 		err = handle_channel_update(rstate, msg);
 		if (err)
-			queue_peer_msg(peer, take(err));
+			return err;
 		break;
 	}
+
+	/* All good, no error to report */
+	return NULL;
 }
 
 static void handle_ping(struct peer *peer, u8 *ping)
@@ -821,6 +824,7 @@ static struct io_plan *peer_msgin(struct io_conn *conn,
 				  struct peer *peer, u8 *msg)
 {
 	enum wire_type t = fromwire_peektype(msg);
+	u8 *err;
 
 	switch (t) {
 	case WIRE_ERROR:
@@ -832,7 +836,9 @@ static struct io_plan *peer_msgin(struct io_conn *conn,
 	case WIRE_CHANNEL_ANNOUNCEMENT:
 	case WIRE_NODE_ANNOUNCEMENT:
 	case WIRE_CHANNEL_UPDATE:
-		handle_gossip_msg(peer, msg);
+		err = handle_gossip_msg(peer->daemon, msg);
+		if (err)
+			queue_peer_msg(peer, take(err));
 		return peer_next_in(conn, peer);
 
 	case WIRE_PING:
@@ -1058,12 +1064,15 @@ static struct io_plan *owner_msg_in(struct io_conn *conn,
 				    struct daemon_conn *dc)
 {
 	struct peer *peer = dc->ctx;
-	u8 *msg = dc->msg_in;
+	u8 *msg = dc->msg_in, *err;
 
 	int type = fromwire_peektype(msg);
 	if (type == WIRE_CHANNEL_ANNOUNCEMENT || type == WIRE_CHANNEL_UPDATE ||
 	    type == WIRE_NODE_ANNOUNCEMENT) {
-		handle_gossip_msg(peer, dc->msg_in);
+		err = handle_gossip_msg(peer->daemon, dc->msg_in);
+		if (err)
+			queue_peer_msg(peer, take(err));
+
 	} else if (type == WIRE_GOSSIP_GET_UPDATE) {
 		handle_get_update(peer, dc->msg_in);
 	} else if (type == WIRE_GOSSIP_LOCAL_ADD_CHANNEL) {
@@ -1133,7 +1142,6 @@ static bool nonlocal_dump_gossip(struct io_conn *conn, struct daemon_conn *dc)
 {
 	const u8 *next;
 	struct peer *peer = dc->ctx;
-
 
 	/* Make sure we are not connected directly */
 	assert(!peer->local);
