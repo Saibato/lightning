@@ -10,6 +10,7 @@
 #include <ccan/tal/path/path.h>
 #include <ccan/tal/str/str.h>
 #include <common/configdir.h>
+#include <common/json_escaped.h>
 #include <common/memleak.h>
 #include <common/tor.h>
 #include <common/version.h>
@@ -954,8 +955,10 @@ static void add_config(struct lightningd *ld,
 		}
 	}
 
-	if (answer)
-		json_add_string_escape(response, name0, answer);
+	if (answer) {
+		struct json_escaped *esc = json_escape(NULL, answer);
+		json_add_escaped_string(response, name0, take(esc));
+	}
 	tal_free(name0);
 }
 
