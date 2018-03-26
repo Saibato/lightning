@@ -401,7 +401,8 @@ int main(int argc, char *argv[])
 	/* Mark ourselves live. */
 	log_info(ld->log, "Server started with public key %s, alias %s (color #%s) and lightningd %s",
 		 type_to_string(tmpctx, struct pubkey, &ld->id),
-		 ld->alias, tal_hex(tmpctx, ld->rgb), version());
+		 json_escape(tmpctx, (const char *)ld->alias)->s,
+		 tal_hex(tmpctx, ld->rgb), version());
 
 	/* Show some info about our addresses */
 	size_t n = tal_count(ld->wireaddrs);
