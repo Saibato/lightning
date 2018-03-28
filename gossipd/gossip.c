@@ -2400,6 +2400,7 @@ int main(int argc, char *argv[])
 			timer_expired(daemon, expired);
 		}
 	}
+	subdaemon_shutdown();
 	return 0;
 }
 #endif
