@@ -9,6 +9,7 @@ COMMON_SRC_NOGEN :=				\
 	common/crypto_state.c			\
 	common/crypto_sync.c			\
 	common/cryptomsg.c			\
+	common/daemon.c				\
 	common/daemon_conn.c			\
 	common/derive_basepoints.c		\
 	common/dev_disconnect.c			\
@@ -20,7 +21,6 @@ COMMON_SRC_NOGEN :=				\
 	common/htlc_wire.c			\
 	common/initial_channel.c		\
 	common/initial_commit_tx.c		\
-	common/io_debug.c			\
 	common/json.c				\
 	common/json_escaped.c			\
 	common/key_derive.c			\
