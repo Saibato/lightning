@@ -163,7 +163,7 @@ void tor_init(struct lightningd *ld)
 			&ai_tor) != 0)
 		errx(1, "getaddrinfo failed for Tor service");
 
-	fd = socket(AF_INET/*ai_tor->ai_protocol*/, SOCK_STREAM, 0);
+	fd = socket(AF_INET, SOCK_STREAM, 0);
 	if (fd < 0)
 		err(1, "Creating stream socket for Tor %s",fmt_wireaddr_without_port(ld, ld->tor_serviceaddr));
 
