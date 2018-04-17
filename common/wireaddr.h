@@ -23,9 +23,9 @@
  *             where `checksum = sha3(".onion checksum" | pubkey || version)[:2]`
  */
 
-#define	TOR_V2_ADDRLEN 12
-#define	TOR_V3_ADDRLEN 37
-#define	FQDN_ADDRLEN 255
+#define	TOR_V2_ADDRLEN 10
+#define	TOR_V3_ADDRLEN 35
+#define	LARGEST_ADDRLEN TOR_V3_ADDRLEN
 
 enum wire_addr_type {
 	ADDR_TYPE_PADDING = 0,
@@ -33,13 +33,13 @@ enum wire_addr_type {
 	ADDR_TYPE_IPV6 = 2,
 	ADDR_TYPE_TOR_V2 = 3,
 	ADDR_TYPE_TOR_V3 = 4
-	};
+};
 
 /* Structure now fit for tor support */
 struct wireaddr {
 	enum wire_addr_type type;
 	u8 addrlen;
-	u8 addr[TOR_V3_ADDRLEN]; //or FQDN_ADDRLEN ?
+	u8 addr[LARGEST_ADDRLEN];
 	u16 port;
 };
 

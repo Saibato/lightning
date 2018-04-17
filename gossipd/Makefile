@@ -17,9 +17,9 @@ LIGHTNINGD_GOSSIP_HEADERS := gossipd/gen_gossip_wire.h \
 	gossipd/gossip_store.h				\
 	gossipd/handshake.h				\
 	gossipd/routing.h				\
+	gossipd/tor.h					\
 	gossipd/broadcast.h
-LIGHTNINGD_GOSSIP_SRC := gossipd/gossip.c	\
-	$(LIGHTNINGD_GOSSIP_HEADERS:.h=.c)
+LIGHTNINGD_GOSSIP_SRC := $(LIGHTNINGD_GOSSIP_HEADERS:.h=.c)
 LIGHTNINGD_GOSSIP_OBJS := $(LIGHTNINGD_GOSSIP_SRC:.c=.o)
 
 # Make sure these depend on everything.
@@ -53,7 +53,6 @@ GOSSIPD_COMMON_OBJS :=				\
 	common/status_wire.o			\
 	common/subdaemon.o			\
 	common/timeout.o			\
-	common/tor.o				\
 	common/type_to_string.o			\
 	common/utils.o				\
 	common/utxo.o				\
@@ -62,6 +61,8 @@ GOSSIPD_COMMON_OBJS :=				\
 	common/wire_error.o			\
 	hsmd/client.o				\
 	hsmd/gen_hsm_client_wire.o		\
+	gossipd/gossip.o			\
+	gossipd/tor.o			\
 	lightningd/gossip_msg.o			\
 	wire/gen_onion_wire.o
 

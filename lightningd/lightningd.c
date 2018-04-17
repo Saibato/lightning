@@ -21,7 +21,6 @@
 #include <common/daemon.h>
 #include <common/memleak.h>
 #include <common/timeout.h>
-#include <common/tor.h>
 #include <common/utils.h>
 #include <common/version.h>
 #include <errno.h>
@@ -32,6 +31,7 @@
 #include <lightningd/jsonrpc.h>
 #include <lightningd/log.h>
 #include <lightningd/options.h>
+#include <lightningd/tor.h>
 #include <onchaind/onchain_wire.h>
 #include <signal.h>
 #include <sys/types.h>
@@ -78,9 +78,9 @@ static struct lightningd *new_lightningd(const tal_t *ctx)
 	ld->pidfile = NULL;
 	ld->ini_autocleaninvoice_cycle = 0;
 	ld->ini_autocleaninvoice_expiredby = 86400;
-	ld->tor_service_password = tal_arrz(ld, char, 32);
-	ld->tor_proxyaddrs = tal_arrz(ld, struct wireaddr,1);
-	ld->tor_serviceaddrs = tal_arrz(ld, struct wireaddr,1);
+	ld->tor_service_password = NULL;
+	ld->tor_proxyaddr = NULL;
+	ld->tor_serviceaddr = NULL;
 	ld->use_tor_proxy_always = false;
 	return ld;
 }
@@ -298,11 +298,7 @@ int main(int argc, char *argv[])
 	signal(SIGPIPE, SIG_IGN);
 
 	/* tor support */
-	if (ld->config.tor_enable_auto_hidden_service) {
-		create_tor_hidden_service_conn(ld);
-					while (!check_return_from_service_call())
-					io_loop(NULL, NULL);
-	}
+	tor_init(ld);
 
 	/* Make sure we can reach other daemons, and versions match. */
 	test_daemons(ld);

@@ -12,7 +12,6 @@
 #include <wallet/txfilter.h>
 #include <wallet/wallet.h>
 
-
 /* BOLT #1:
  *
  * The default TCP port is 9735. This corresponds to hexadecimal
@@ -184,8 +183,8 @@ struct lightningd {
 #endif /* DEVELOPER */
 
 	/* tor support */
-	struct wireaddr *tor_proxyaddrs;
-	struct wireaddr *tor_serviceaddrs;
+	struct wireaddr *tor_proxyaddr;
+	struct wireaddr *tor_serviceaddr;
 	char *tor_service_password;
 	bool use_tor_proxy_always;
 };
