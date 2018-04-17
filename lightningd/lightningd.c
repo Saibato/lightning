@@ -385,7 +385,7 @@ int main(int argc, char *argv[])
 		 type_to_string(tmpctx, struct pubkey, &ld->id),
 		 json_escape(tmpctx, (const char *)ld->alias)->s,
 		 tal_hex(tmpctx, ld->rgb), version());
-
+  
 	/* Show some info about our addresses */
 	size_t n = tal_count(ld->wireaddrs);
 	for (int i = 0; i < n; i++)
