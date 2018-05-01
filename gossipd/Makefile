@@ -63,6 +63,8 @@ GOSSIPD_COMMON_OBJS :=				\
 	common/wire_error.o			\
 	hsmd/client.o				\
 	hsmd/gen_hsm_client_wire.o		\
+	gossipd/gossip.o			\
+	gossipd/tor.o			\
 	lightningd/gossip_msg.o			\
 	wire/gen_onion_wire.o
 
