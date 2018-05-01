@@ -79,6 +79,9 @@ struct config {
 	/* ipv6 bind disable */
 	bool no_ipv6_bind;
 
+	/* Number of blocks to rescan from the current head, or absolute
+	 * blockheight if rescan >= 500'000 */
+	s32 rescan;
 };
 
 struct lightningd {
@@ -132,6 +135,9 @@ struct lightningd {
 	/* Outstanding connect commands. */
 	struct list_head connects;
 
+	/* Outstanding fundchannel commands. */
+	struct list_head fundchannels;
+
 	/* Our chain topology. */
 	struct chain_topology *topology;
 
@@ -145,6 +151,8 @@ struct lightningd {
 	struct list_head waitsendpay_commands;
 	/* Outstanding sendpay commands. */
 	struct list_head sendpay_commands;
+	/* Outstanding close commands. */
+	struct list_head close_commands;
 
 	/* Maintained by invoices.c */
 	struct invoices *invoices;

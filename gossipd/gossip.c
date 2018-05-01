@@ -14,10 +14,13 @@
 #include <ccan/take/take.h>
 #include <ccan/tal/str/str.h>
 #include <ccan/timer/timer.h>
+#include <common/bech32.h>
+#include <common/bech32_util.h>
 #include <common/cryptomsg.h>
 #include <common/daemon_conn.h>
 #include <common/features.h>
 #include <common/ping.h>
+#include <common/pseudorand.h>
 #include <common/status.h>
 #include <common/subdaemon.h>
 #include <common/timeout.h>
@@ -54,12 +57,55 @@
 
 #define HSM_FD 3
 
+#define INITIAL_WAIT_SECONDS	1
+#define MAX_WAIT_SECONDS	300
+
+/* We put everything in this struct (redundantly) to pass it to timer cb */
+struct important_peerid {
+	struct daemon *daemon;
+
+	struct pubkey id;
+
+	/* How long to wait after failed connect */
+	unsigned int wait_seconds;
+
+	/* The timer we're using to reconnect */
+	struct oneshot *reconnect_timer;
+};
+
+/* We keep a set of peer ids we're always trying to reach. */
+static const struct pubkey *
+important_peerid_keyof(const struct important_peerid *imp)
+{
+	return &imp->id;
+}
+
+static bool important_peerid_eq(const struct important_peerid *imp,
+				const struct pubkey *key)
+{
+	return pubkey_eq(&imp->id, key);
+}
+
+static size_t important_peerid_hash(const struct pubkey *id)
+{
+	return siphash24(siphash_seed(), id, sizeof(*id));
+}
+
+HTABLE_DEFINE_TYPE(struct important_peerid,
+		   important_peerid_keyof,
+		   important_peerid_hash,
+		   important_peerid_eq,
+		   important_peerid_map);
+
 struct daemon {
 	/* Who am I? */
 	struct pubkey id;
 
-	/* Peers we have directly or indirectly */
+	/* Peers we have directly or indirectly: id is unique */
 	struct list_head peers;
+
+	/* Peers reconnecting now (waiting for current peer to die). */
+	struct list_head reconnecting;
 
 	/* Peers we are trying to reach */
 	struct list_head reaching;
@@ -77,6 +123,9 @@ struct daemon {
 
 	u32 broadcast_interval;
 
+	/* Important peers */
+	struct important_peerid_map important_peerids;
+
 	/* Local and global features to offer to peers. */
 	u8 *localfeatures, *globalfeatures;
 
@@ -90,6 +139,8 @@ struct daemon {
 	struct wireaddr *tor_proxyaddr;
 	bool use_tor_proxy_always;
 
+	/* Only matters if DEVELOPER defined */
+	bool no_reconnect;
 };
 
 /* Peers we're trying to reach. */
@@ -102,20 +153,14 @@ struct reaching {
 	/* The ID of the peer (not necessarily unique, in transit!) */
 	struct pubkey id;
 
-	/* Where I'm reaching to. */
+	/* FIXME: Support multiple address. */
 	struct wireaddr addr;
 
-	/* Did we succeed? */
-	bool succeeded;
+	/* Whether connect command is waiting for the result. */
+	bool master_needs_response;
 
-	/* How many times have we attempted to connect? */
-	u32 attempts;
-
-	/* How many times to attempt */
-	u32 max_attempts;
-
-	/* Timestamp of the first attempt */
-	u32 first_attempt;
+	/* How far did we get? */
+	const char *connstate;
 };
 
 /* Things we need when we're talking direct to the peer. */
@@ -163,9 +208,6 @@ struct peer {
 	/* Is it time to continue the staggered broadcast? */
 	bool gossip_sync;
 
-	/* If we die, should we reach again? */
-	bool reach_again;
-
 	/* Only one of these is set: */
 	struct local_peer_state *local;
 	struct daemon_conn *remote;
@@ -185,13 +227,19 @@ static struct io_plan *peer_start_gossip(struct io_conn *conn,
 					 struct peer *peer);
 static bool send_peer_with_fds(struct peer *peer, const u8 *msg);
 static void wake_pkt_out(struct peer *peer);
-static bool try_reach_peer(struct daemon *daemon, const struct pubkey *id);
+static void retry_important(struct important_peerid *imp);
 
 static void destroy_peer(struct peer *peer)
 {
+	struct important_peerid *imp;
+
 	list_del_from(&peer->daemon->peers, &peer->list);
-	if (peer->reach_again)
-		try_reach_peer(peer->daemon, &peer->id);
+	imp = important_peerid_map_get(&peer->daemon->important_peerids,
+				       &peer->id);
+	if (imp) {
+		imp->wait_seconds = INITIAL_WAIT_SECONDS;
+		retry_important(imp);
+	}
 }
 
 static struct peer *find_peer(struct daemon *daemon, const struct pubkey *id)
@@ -202,6 +250,34 @@ static struct peer *find_peer(struct daemon *daemon, const struct pubkey *id)
 		if (pubkey_eq(&peer->id, id))
 			return peer;
 	return NULL;
+}
+
+static struct peer *find_reconnecting_peer(struct daemon *daemon,
+					   const struct pubkey *id)
+{
+	struct peer *peer;
+
+	list_for_each(&daemon->reconnecting, peer, list)
+		if (pubkey_eq(&peer->id, id))
+			return peer;
+	return NULL;
+}
+
+static void destroy_reconnecting_peer(struct peer *peer)
+{
+	list_del_from(&peer->daemon->reconnecting, &peer->list);
+	/* This is safe even if we're being destroyed because of peer->conn,
+	 * since tal_free protects against loops. */
+	io_close(peer->local->conn);
+}
+
+static void add_reconnecting_peer(struct daemon *daemon, struct peer *peer)
+{
+	/* Drop any previous connecting peer */
+	tal_free(find_reconnecting_peer(peer->daemon, &peer->id));
+
+	list_add_tail(&daemon->reconnecting, &peer->list);
+	tal_add_destructor(peer, destroy_reconnecting_peer);
 }
 
 static void destroy_addrhint(struct addrhint *a)
@@ -248,7 +324,6 @@ static struct peer *new_peer(const tal_t *ctx,
 	peer->daemon = daemon;
 	peer->local = new_local_peer_state(peer, cs);
 	peer->remote = NULL;
-	peer->reach_again = false;
 
 	return peer;
 }
@@ -279,20 +354,27 @@ static struct reaching *find_reaching(struct daemon *daemon,
 	return NULL;
 }
 
-static void reached_peer(struct daemon *daemon, const struct pubkey *id,
-			 struct io_conn *conn)
+static void reached_peer(struct peer *peer, struct io_conn *conn)
 {
-	struct reaching *r = find_reaching(daemon, id);
+	/* OK, we've reached the peer successfully, tell everyone. */
+	struct reaching *r = find_reaching(peer->daemon, &peer->id);
+	u8 *msg;
 
 	if (!r)
 		return;
 
-	/* OK, we've reached the peer successfully, stop retrying. */
-
-	/* Don't free conn with reach. */
-	tal_steal(daemon, conn);
 	/* Don't call connect_failed */
 	io_set_finish(conn, NULL, NULL);
+
+	/* Don't free conn with reach */
+	tal_steal(peer->daemon, conn);
+
+	/* Tell any connect command what happened. */
+	if (r->master_needs_response) {
+		msg = towire_gossipctl_connect_to_peer_result(NULL, &r->id,
+							      true, "");
+		daemon_conn_send(&peer->daemon->master, take(msg));
+	}
 
 	tal_free(r);
 }
@@ -301,9 +383,8 @@ static void queue_peer_msg(struct peer *peer, const u8 *msg TAKES)
 {
 	if (peer->local) {
 		msg_enqueue(&peer->local->peer_out, msg);
-	} else {
-		/* Use gossip_index 0 meaning don't update index */
-		const u8 *send = towire_gossip_send_gossip(NULL, 0, msg);
+	} else if (peer->remote) {
+		const u8 *send = towire_gossip_send_gossip(NULL, msg);
 		if (taken(msg))
 			tal_free(msg);
 		daemon_conn_send(peer->remote, take(send));
@@ -345,18 +426,47 @@ static struct io_plan *peer_close_after_error(struct io_conn *conn,
 	return io_close(conn);
 }
 
-static struct io_plan *peer_init_received(struct io_conn *conn,
-					  struct peer *peer,
-					  u8 *msg)
+/* Mutual recursion */
+static struct io_plan *peer_connected(struct io_conn *conn, struct peer *peer);
+static struct io_plan *retry_peer_connected(struct io_conn *conn,
+					    struct peer *peer)
 {
-	if (!fromwire_init(peer, msg, &peer->gfeatures, &peer->lfeatures)){
-		status_trace("peer %s bad fromwire_init '%s', closing",
+	status_trace("peer %s: processing now old peer gone",
+		     type_to_string(tmpctx, struct pubkey, &peer->id));
+
+	/* Clean up reconnecting state, try again */
+	list_del_from(&peer->daemon->reconnecting, &peer->list);
+	tal_del_destructor(peer, destroy_reconnecting_peer);
+
+	return peer_connected(conn, peer);
+}
+
+static struct io_plan *peer_connected(struct io_conn *conn, struct peer *peer)
+{
+	struct peer *old_peer;
+	u8 *msg;
+
+	/* Now, is this a reconnect? */
+	old_peer = find_peer(peer->daemon, &peer->id);
+	if (old_peer) {
+		status_trace("peer %s: reconnect for %s",
 			     type_to_string(tmpctx, struct pubkey, &peer->id),
-			     tal_hex(tmpctx, msg));
-		return io_close(conn);
+			     old_peer->local ? "local peer" : "active peer");
+		if (!old_peer->local) {
+			/* If not already closed, close it: it will
+			 * fail, and master will peer_died to us */
+			if (old_peer->remote) {
+				daemon_conn_clear(old_peer->remote);
+				old_peer->remote = tal_free(old_peer->remote);
+			}
+			add_reconnecting_peer(peer->daemon, peer);
+			return io_wait(conn, peer, retry_peer_connected, peer);
+		}
+		/* Local peers can just be discarded when they reconnect */
+		tal_free(old_peer);
 	}
 
-	reached_peer(peer->daemon, &peer->id, conn);
+	reached_peer(peer, conn);
 
 	/* BOLT #7:
 	 *
@@ -371,25 +481,35 @@ static struct io_plan *peer_init_received(struct io_conn *conn,
 		peer->broadcast_index
 			= peer->daemon->rstate->broadcasts->next_index;
 
-	/* This is a full peer now; we keep it around until its
-	 * gossipfd closed (forget_peer) or reconnect. */
+	/* This is a full peer now; we keep it around until master says
+	 * it's dead. */
 	peer_finalized(peer);
 
 	/* We will not have anything queued, since we're not duplex. */
 	msg = towire_gossip_peer_connected(peer, &peer->id, &peer->addr,
 					   &peer->local->pcs.cs,
-					   peer->broadcast_index,
 					   peer->gfeatures, peer->lfeatures);
 	if (!send_peer_with_fds(peer, msg))
 		return io_close(conn);
 
 	/* Start the gossip flowing. */
-	/* FIXME: This is a bit wasteful in the common case where master
-	 * simply hands it straight back to us and we restart the peer and
-	 * restart gossip broadcast... */
 	wake_pkt_out(peer);
 
 	return io_close_taken_fd(conn);
+}
+
+static struct io_plan *peer_init_received(struct io_conn *conn,
+					  struct peer *peer,
+					  u8 *msg)
+{
+	if (!fromwire_init(peer, msg, &peer->gfeatures, &peer->lfeatures)) {
+		status_trace("peer %s bad fromwire_init '%s', closing",
+			     type_to_string(tmpctx, struct pubkey, &peer->id),
+			     tal_hex(tmpctx, msg));
+		return io_close(conn);
+	}
+
+	return peer_connected(conn, peer);
 }
 
 static struct io_plan *read_init(struct io_conn *conn, struct peer *peer)
@@ -571,7 +691,6 @@ static struct io_plan *ready_for_master(struct io_conn *conn, struct peer *peer)
 		msg = towire_gossip_peer_nongossip(peer, &peer->id,
 						   &peer->addr,
 						   &peer->local->pcs.cs,
-						   peer->broadcast_index,
 						   peer->gfeatures,
 						   peer->lfeatures,
 						   peer->local->nongossip_msg);
@@ -579,7 +698,6 @@ static struct io_plan *ready_for_master(struct io_conn *conn, struct peer *peer)
 		msg = towire_gossipctl_release_peer_reply(peer,
 							  &peer->addr,
 							  &peer->local->pcs.cs,
-							  peer->broadcast_index,
 							  peer->gfeatures,
 							  peer->lfeatures);
 
@@ -691,7 +809,7 @@ static void wake_pkt_out(struct peer *peer)
 	if (peer->local)
 		/* Notify the peer-write loop */
 		msg_wake(&peer->local->peer_out);
-	else
+	else if (peer->remote)
 		/* Notify the daemon_conn-write loop */
 		msg_wake(&peer->remote->out);
 }
@@ -794,56 +912,6 @@ static void handle_get_update(struct peer *peer, const u8 *msg)
 	daemon_conn_send(peer->remote, take(msg));
 }
 
-static void handle_local_add_channel(struct peer *peer, u8 *msg)
-{
-	struct routing_state *rstate = peer->daemon->rstate;
-	struct short_channel_id scid;
-	struct bitcoin_blkid chain_hash;
-	struct pubkey remote_node_id;
-	u16 cltv_expiry_delta;
-	u32 fee_base_msat, fee_proportional_millionths;
-	u64 htlc_minimum_msat;
-	int idx;
-	struct chan *chan;
-
-	if (!fromwire_gossip_local_add_channel(
-		msg, &scid, &chain_hash, &remote_node_id,
-		&cltv_expiry_delta, &htlc_minimum_msat, &fee_base_msat,
-		&fee_proportional_millionths)) {
-		status_broken("Unable to parse local_add_channel message: %s", tal_hex(msg, msg));
-		return;
-	}
-
-	if (!structeq(&chain_hash, &rstate->chain_hash)) {
-		status_broken("Received local_add_channel for unknown chain %s",
-			     type_to_string(msg, struct bitcoin_blkid,
-					    &chain_hash));
-		return;
-	}
-
-	if (get_channel(rstate, &scid)) {
-		status_broken("Attempted to local_add_channel a known channel");
-		return;
-	}
-
-	/* Create new channel */
-	chan = new_chan(rstate, &scid, &rstate->local_id, &remote_node_id);
-
-	idx = pubkey_idx(&rstate->local_id, &remote_node_id),
-	/* Activate the half_chan from us to them. */
-	set_connection_values(chan, idx,
-			      fee_base_msat,
-			      fee_proportional_millionths,
-			      cltv_expiry_delta,
-			      true,
-			      0,
-			      htlc_minimum_msat);
-	/* Designed to match msg in handle_channel_update, for easy testing */
-	status_trace("Received local update for channel %s(%d) now ACTIVE",
-		     type_to_string(msg, struct short_channel_id, &scid),
-		     idx);
-}
-
 /**
  * owner_msg_in - Called by the `peer->remote` upon receiving a
  * message
@@ -864,28 +932,24 @@ static struct io_plan *owner_msg_in(struct io_conn *conn,
 	} else if (type == WIRE_GOSSIP_GET_UPDATE) {
 		handle_get_update(peer, dc->msg_in);
 	} else if (type == WIRE_GOSSIP_LOCAL_ADD_CHANNEL) {
-		handle_local_add_channel(peer, dc->msg_in);
+		gossip_store_local_add_channel(peer->daemon->rstate->store,
+					       dc->msg_in);
+		handle_local_add_channel(peer->daemon->rstate, dc->msg_in);
 	} else {
 		status_broken("peer %s: send us unknown msg of type %s",
 			      type_to_string(tmpctx, struct pubkey, &peer->id),
 			      gossip_wire_type_name(type));
-		/* Calls forget_peer */
 		return io_close(conn);
 	}
 
 	return daemon_conn_read_next(conn, dc);
 }
 
-static void forget_peer(struct io_conn *conn UNUSED, struct daemon_conn *dc)
+static void free_peer_remote(struct io_conn *conn, struct daemon_conn *dc)
 {
 	struct peer *peer = dc->ctx;
 
-	status_trace("Forgetting %s peer %s",
-		     peer->local ? "local" : "remote",
-		     type_to_string(tmpctx, struct pubkey, &peer->id));
-
-	/* Free peer. */
-	tal_free(dc->ctx);
+	peer->remote = tal_free(peer->remote);
 }
 
 /* When a peer is to be owned by another daemon, we create a socket
@@ -908,11 +972,14 @@ static bool send_peer_with_fds(struct peer *peer, const u8 *msg)
 	peer->local = tal_free(peer->local);
 	peer->remote = tal(peer, struct daemon_conn);
 	daemon_conn_init(peer, peer->remote, fds[0],
-			 owner_msg_in, forget_peer);
+			 owner_msg_in, free_peer_remote);
 	peer->remote->msg_queue_cleared_cb = nonlocal_dump_gossip;
 
 	/* Peer stays around, even though caller will close conn. */
 	tal_steal(peer->daemon, peer);
+
+	status_debug("peer %s now remote",
+		     type_to_string(tmpctx, struct pubkey, &peer->id));
 
 	daemon_conn_send(&peer->daemon->master, msg);
 	daemon_conn_send_fd(&peer->daemon->master, peer_fd);
@@ -945,9 +1012,7 @@ static bool nonlocal_dump_gossip(struct io_conn *conn, struct daemon_conn *dc)
 		peer->gossip_sync = false;
 		return false;
 	} else {
-		u8 *msg = towire_gossip_send_gossip(NULL,
-						    peer->broadcast_index,
-						    next);
+		u8 *msg = towire_gossip_send_gossip(NULL, next);
 		daemon_conn_send(peer->remote, take(msg));
 		return true;
 	}
@@ -973,16 +1038,38 @@ struct returning_peer {
 	struct daemon *daemon;
 	struct pubkey id;
 	struct crypto_state cs;
-	u64 gossip_index;
 	u8 *inner_msg;
 	int peer_fd, gossip_fd;
 };
+
+static void drain_and_forward_gossip(struct peer *peer, int gossip_fd)
+{
+	u8 *msg;
+
+	/* Be careful: what if they handed wrong fd?  Make it non-blocking. */
+	if (!io_fd_block(gossip_fd, false)) {
+		status_unusual("NONBLOCK failed for gossip_fd from peer %s: %s",
+			       type_to_string(tmpctx, struct pubkey, &peer->id),
+			       strerror(errno));
+		return;
+	}
+
+	/* It's sync, but not blocking. */
+	while ((msg = wire_sync_read(tmpctx, gossip_fd)) != NULL) {
+		u8 *gossip;
+		if (!fromwire_gossip_send_gossip(NULL, msg, &gossip))
+			break;
+		msg_enqueue(&peer->local->peer_out, take(gossip));
+	}
+
+	close(gossip_fd);
+}
 
 static struct io_plan *handle_returning_peer(struct io_conn *conn,
 					     struct returning_peer *rpeer)
 {
 	struct daemon *daemon = rpeer->daemon;
-	struct peer *peer;
+	struct peer *peer, *connecting;
 
 	peer = find_peer(daemon, &rpeer->id);
 	if (!peer)
@@ -990,17 +1077,20 @@ static struct io_plan *handle_returning_peer(struct io_conn *conn,
 			      "hand_back_peer unknown peer: %s",
 			      type_to_string(tmpctx, struct pubkey, &rpeer->id));
 
-	/* We don't need the gossip_fd; we know what gossip it got
-	 * from gossip_index */
-	close(rpeer->gossip_fd);
+	assert(!peer->local);
 
-	/* Possible if there's a reconnect: ignore handed back. */
-	if (peer->local) {
-		status_trace("hand_back_peer %s: reconnected, dropping handback",
-			     type_to_string(tmpctx, struct pubkey, &rpeer->id));
+	/* Corner case: we got a reconnection while master was handing this
+	 * back.  We would have killed it immediately if it was local previously
+	 * so do that now */
+	connecting = find_reconnecting_peer(daemon, &rpeer->id);
+	if (connecting) {
+		status_trace("Forgetting handed back peer %s",
+			     type_to_string(tmpctx, struct pubkey, &peer->id));
 
-		close(rpeer->peer_fd);
-		tal_free(rpeer);
+		tal_free(peer);
+		/* Now connecting peer can go ahead. */
+		io_wake(connecting);
+
 		return daemon_conn_read_next(conn, &daemon->master);
 	}
 
@@ -1013,7 +1103,9 @@ static struct io_plan *handle_returning_peer(struct io_conn *conn,
 
 	peer->local = new_local_peer_state(peer, &rpeer->cs);
 	peer->local->fd = rpeer->peer_fd;
-	peer->broadcast_index = rpeer->gossip_index;
+
+	/* Forward any gossip we sent while fd wasn't being read */
+	drain_and_forward_gossip(peer, rpeer->gossip_fd);
 
 	/* If they told us to send a message, queue it now */
 	if (tal_len(rpeer->inner_msg))
@@ -1039,7 +1131,6 @@ static struct io_plan *hand_back_peer(struct io_conn *conn,
 	rpeer->daemon = daemon;
 	if (!fromwire_gossipctl_hand_back_peer(msg, msg,
 					       &rpeer->id, &rpeer->cs,
-					       &rpeer->gossip_index,
 					       &rpeer->inner_msg))
 		master_badmsg(WIRE_GOSSIPCTL_HAND_BACK_PEER, msg);
 
@@ -1434,7 +1525,7 @@ static void gossip_refresh_network(struct daemon *daemon)
 static struct io_plan *connection_in(struct io_conn *conn, struct daemon *daemon)
 {
 	struct wireaddr addr;
-	struct sockaddr_storage s;
+	struct sockaddr_storage s = {};
 	socklen_t len = sizeof(s);
 
 	if (getpeername(io_conn_fd(conn), (struct sockaddr *)&s, &len) != 0) {
@@ -1497,7 +1588,7 @@ static void setup_listeners(struct daemon *daemon, u16 portnum)
 	/* IPv6, since on Linux that (usually) binds to IPv4 too. */
 	fd1 = make_listen_fd(AF_INET6, &addr6, sizeof(addr6), true);
 	if (fd1 >= 0) {
-		struct sockaddr_in6 in6;
+		struct sockaddr_in6 in6 = {};
 
 		len = sizeof(in6);
 		if (getsockname(fd1, (void *)&in6, &len) != 0) {
@@ -1545,29 +1636,44 @@ static struct io_plan *gossip_init(struct daemon_conn *master,
 				   const u8 *msg)
 {
 	struct bitcoin_blkid chain_hash;
-	u16 port;
 	u32 update_channel_interval;
 
 	if (!fromwire_gossipctl_init(
 		daemon, msg, &daemon->broadcast_interval, &chain_hash,
-		&daemon->id, &port, &daemon->globalfeatures,
+		&daemon->id, &daemon->globalfeatures,
 		&daemon->localfeatures, &daemon->wireaddrs, daemon->rgb,
 		daemon->alias, &update_channel_interval, &daemon->tor_proxyaddr,
-		&daemon->use_tor_proxy_always)) {
+		&daemon->use_tor_proxy_always, &daemon->no_reconnect)) {
 		master_badmsg(WIRE_GOSSIPCTL_INIT, msg);
 	}
 	/* Prune time is twice update time */
 	daemon->rstate = new_routing_state(daemon, &chain_hash, &daemon->id,
 					   update_channel_interval * 2);
 
-	setup_listeners(daemon, port);
+	/* Load stored gossip messages */
+	gossip_store_load(daemon->rstate, daemon->rstate->store);
 
 	new_reltimer(&daemon->timers, daemon,
 		     time_from_sec(daemon->rstate->prune_timeout/4),
 		     gossip_refresh_network, daemon);
 
-	/* Load stored gossip messages */
-	gossip_store_load(daemon->rstate, daemon->rstate->store);
+	return daemon_conn_read_next(master->conn, master);
+}
+
+static struct io_plan *gossip_activate(struct daemon_conn *master,
+				       struct daemon *daemon,
+				       const u8 *msg)
+{
+	u16 port;
+
+	if (!fromwire_gossipctl_activate(msg, &port))
+		master_badmsg(WIRE_GOSSIPCTL_ACTIVATE, msg);
+
+	setup_listeners(daemon, port);
+
+	/* OK, we're ready! */
+	daemon_conn_send(&daemon->master,
+			 take(towire_gossipctl_activate_reply(NULL)));
 
 	return daemon_conn_read_next(master->conn, master);
 }
@@ -1607,6 +1713,7 @@ static struct io_plan *handshake_out_success(struct io_conn *conn,
 					     const struct crypto_state *cs,
 					     struct reaching *reach)
 {
+	reach->connstate = "Exchanging init messages";
 	return init_new_peer(conn, id, addr, cs, reach->daemon);
 }
 
@@ -1617,39 +1724,49 @@ struct io_plan *connection_out(struct io_conn *conn, struct reaching *reach)
 	status_trace("Connected out for %s",
 		     type_to_string(tmpctx, struct pubkey, &reach->id));
 
+	reach->connstate = "Cryptographic handshake";
 	return initiator_handshake(conn, &reach->daemon->id, &reach->id,
 				   &reach->addr,
 				   handshake_out_success, reach);
 }
 
-static void try_connect(struct reaching *reach);
-
-static void unreachable(struct reaching *reach, bool addr_unknown)
-{
-	u32 diff = time_now().ts.tv_sec - reach->first_attempt;
-
-	daemon_conn_send(&reach->daemon->master,
-			 take(towire_gossip_peer_connection_failed(
-				      NULL, &reach->id, diff, reach->attempts,
-				      addr_unknown)));
-	tal_free(reach);
-}
 
 static void connect_failed(struct io_conn *conn, struct reaching *reach)
 {
-	reach->attempts++;
+	u8 *msg;
+	struct important_peerid *imp;
+	const char *err = tal_fmt(tmpctx, "%s: %s",
+				  reach->connstate,
+				  strerror(errno));
 
-	if (reach->attempts >= reach->max_attempts) {
-		status_info("Failed to connect after %d attempts, giving up",
-			    reach->attempts);
-		unreachable(reach, false);
-	} else {
-		status_trace("Failed connected out for %s, will try again",
-			     type_to_string(tmpctx, struct pubkey, &reach->id));
-		/* FIXME: Configurable timer! */
-		new_reltimer(&reach->daemon->timers, reach, time_from_sec(5),
-			     try_connect, reach);
+	/* Tell any connect command what happened. */
+	if (reach->master_needs_response) {
+		msg = towire_gossipctl_connect_to_peer_result(NULL, &reach->id,
+							      false, err);
+		daemon_conn_send(&reach->daemon->master, take(msg));
 	}
+
+	status_trace("Failed connected out for %s",
+		     type_to_string(tmpctx, struct pubkey, &reach->id));
+
+	/* If we want to keep trying, do so. */
+	imp = important_peerid_map_get(&reach->daemon->important_peerids,
+				       &reach->id);
+	if (imp) {
+		imp->wait_seconds *= 2;
+		if (imp->wait_seconds > MAX_WAIT_SECONDS)
+			imp->wait_seconds = MAX_WAIT_SECONDS;
+
+		status_trace("...will try again in %u seconds",
+			     imp->wait_seconds);
+		/* If important_id freed, this will be removed too */
+		imp->reconnect_timer
+			= new_reltimer(&reach->daemon->timers, imp,
+				       time_from_sec(imp->wait_seconds),
+				       retry_important, imp);
+	}
+	tal_free(reach);
+	return;
 }
 
 static struct io_plan *conn_init(struct io_conn *conn, struct reaching *reach)
@@ -1724,26 +1841,113 @@ static struct io_plan *conn_init(struct io_conn *conn, struct reaching *reach)
 return io_close(conn);
 }
 
-static void try_connect(struct reaching *reach)
+static struct addrhint *
+seed_resolve_addr(const tal_t *ctx, const struct pubkey *id, const u16 port)
+{
+	struct addrhint *a;
+	char bech32[100], *addr;
+	u8 der[PUBKEY_DER_LEN];
+	u5 *data = tal_arr(ctx, u5, 0);
+
+	pubkey_to_der(der, id);
+	bech32_push_bits(&data, der, PUBKEY_DER_LEN*8);
+	bech32_encode(bech32, "ln", data, tal_count(data), sizeof(bech32));
+	addr = tal_fmt(ctx, "%s.lseed.bitcoinstats.com", bech32);
+
+	status_trace("Resolving %s", addr);
+
+	a = tal(ctx, struct addrhint);
+	if (!wireaddr_from_hostname(&a->addr, addr, port, NULL)) {
+		status_trace("Could not resolve %s", addr);
+		return tal_free(a);
+	} else {
+		status_trace("Resolved %s to %s", addr,
+			     type_to_string(ctx, struct wireaddr, &a->addr));
+		return a;
+	}
+}
+
+/* Resolve using gossiped wireaddr stored in routemap. */
+static struct addrhint *
+gossip_resolve_addr(const tal_t *ctx,
+		    struct routing_state *rstate,
+		    const struct pubkey *id)
+{
+	struct node *node;
+	struct addrhint *a;
+
+	/* Get from routing state. */
+	node = get_node(rstate, id);
+
+	/* No matching node? */
+	if (!node)
+		return NULL;
+	/* Node has no addresses? */
+	if (tal_count(node->addresses) == 0)
+		return NULL;
+
+	/* FIXME: When struct addrhint can contain more than one address,
+	 * we should copy all addresses.
+	 * For now getting first address should be fine. */
+	a = tal(ctx, struct addrhint);
+	a->addr = node->addresses[0];
+
+	return a;
+}
+
+static void try_reach_peer(struct daemon *daemon, const struct pubkey *id,
+			   bool master_needs_response)
 {
 	struct addrhint *a;
 	int fd;
+	struct reaching *reach;
+	u8 *msg;
+	struct peer *peer = find_peer(daemon, id);
 
-	/* Already succeeded somehow? */
-	if (find_peer(reach->daemon, &reach->id)) {
-		status_trace("Already reached %s, not retrying",
-			     type_to_string(tmpctx, struct pubkey, &reach->id));
-		/* FIXME: SAIBATO we should not free this here its the orig not a dup ? */
-		/* tal_free(reach); */
+	if (peer) {
+		status_debug("try_reach_peer: have peer %s",
+			     type_to_string(tmpctx, struct pubkey, id));
+		if (master_needs_response) {
+			msg = towire_gossipctl_connect_to_peer_result(NULL, id,
+								      true,
+								      "");
+			daemon_conn_send(&daemon->master, take(msg));
+		}
 		return;
 	}
 
-	a = find_addrhint(reach->daemon, &reach->id);
+	/* If we're trying to reach it right now, that's OK. */
+	reach = find_reaching(daemon, id);
+	if (reach) {
+		/* Please tell us too.  Master should not ask twice (we'll
+		 * only respond once, and so one request will get stuck) */
+		if (reach->master_needs_response)
+			status_failed(STATUS_FAIL_MASTER_IO,
+				      "Already reaching %s",
+				      type_to_string(tmpctx, struct pubkey, id));
+		reach->master_needs_response = true;
+		return;
+	}
+
+	a = find_addrhint(daemon, id);
+
+	if (!a)
+		a = gossip_resolve_addr(tmpctx,
+					daemon->rstate,
+					id);
+
+	if (!a)
+		a = seed_resolve_addr(tmpctx, id, 9735);
+
 	if (!a) {
-		/* FIXME: now try node table, dns lookups... */
-		status_info("No address known for %s, giving up",
-			    type_to_string(tmpctx, struct pubkey, &reach->id));
-		unreachable(reach, true);
+		status_debug("No address known for %s, giving up",
+			     type_to_string(tmpctx, struct pubkey, id));
+		if (master_needs_response) {
+			msg = towire_gossipctl_connect_to_peer_result(NULL, id,
+					      false,
+					      "No address known, giving up");
+			daemon_conn_send(&daemon->master, take(msg));
+		}
 		return;
 	}
 
@@ -1773,71 +1977,62 @@ static void try_connect(struct reaching *reach)
 	}
 
 	if (fd < 0) {
-		status_info("Can't open %i socket for %s (%s), giving up",
-			      a->addr.type,
-			      type_to_string(tmpctx, struct pubkey, &reach->id),
-			      strerror(errno));
-		tal_free(reach);
+		char *err = tal_fmt(tmpctx,
+				    "Can't open %i socket for %s (%s), giving up",
+				    a->addr.type,
+				    type_to_string(tmpctx, struct pubkey, id),
+				    strerror(errno));
+		status_debug("%s", err);
+		if (master_needs_response) {
+			msg = towire_gossipctl_connect_to_peer_result(NULL, id,
+							      false, err);
+			daemon_conn_send(&daemon->master, take(msg));
+		}
 		return;
 	}
 
-	reach->addr = a->addr;
-	io_new_conn(reach, fd, conn_init, reach);
-}
-
-/* Returns true if we're already connected. */
-static bool try_reach_peer(struct daemon *daemon, const struct pubkey *id)
-{
-	struct reaching *reach;
-	struct peer *peer;
-
-	if (find_reaching(daemon, id)) {
-		/* FIXME: Perhaps kick timer in this case? */
-		status_trace("try_reach_peer: already trying to reach %s",
-			     type_to_string(tmpctx, struct pubkey, id));
-		return false;
-	}
-
-	/* Master might find out before we do that a peer is dead; if we
-	 * seem to be connected just mark it for reconnect. */
-	peer = find_peer(daemon, id);
-	if (peer) {
-		status_trace("reach_peer: have %s, will retry if it dies",
-			     type_to_string(tmpctx, struct pubkey, id));
-		peer->reach_again = true;
-		return true;
-	}
-
+	/* Start connecting to it */
 	reach = tal(daemon, struct reaching);
-	reach->succeeded = false;
 	reach->daemon = daemon;
 	reach->id = *id;
-	reach->first_attempt = time_now().ts.tv_sec;
-	reach->attempts = 0;
-	reach->max_attempts = GOSSIP_MAX_REACH_ATTEMPTS;
+	reach->addr = a->addr;
+	reach->master_needs_response = master_needs_response;
+	reach->connstate = "Connection establishment";
 	list_add_tail(&daemon->reaching, &reach->list);
 	tal_add_destructor(reach, destroy_reaching);
 
-	try_connect(reach);
-	return false;
+	io_new_conn(reach, fd, conn_init, reach);
 }
 
-/* This catches all kinds of failures, like network errors. */
-static struct io_plan *reach_peer(struct io_conn *conn,
-				  struct daemon *daemon, const u8 *msg)
+/* Called from timer, so needs single-arg declaration */
+static void retry_important(struct important_peerid *imp)
+{
+	/* In case we've come off a timer, don't leave dangling pointer */
+	imp->reconnect_timer = NULL;
+
+#if DEVELOPER
+	/* With --dev-no-reconnect, we only want explicit
+	 * connects */
+	if (imp->daemon->no_reconnect)
+		return;
+#endif
+	try_reach_peer(imp->daemon, &imp->id, false);
+}
+
+static struct io_plan *connect_to_peer(struct io_conn *conn,
+				       struct daemon *daemon, const u8 *msg)
 {
 	struct pubkey id;
+	struct important_peerid *imp;
 
-	if (!fromwire_gossipctl_reach_peer(msg, &id))
-		master_badmsg(WIRE_GOSSIPCTL_REACH_PEER, msg);
+	if (!fromwire_gossipctl_connect_to_peer(msg, &id))
+		master_badmsg(WIRE_GOSSIPCTL_CONNECT_TO_PEER, msg);
 
-	/* Master can't check this itself, because that's racy. */
-	if (try_reach_peer(daemon, &id)) {
-		daemon_conn_send(&daemon->master,
-				 take(towire_gossip_peer_already_connected(NULL,
-									  &id)));
-	}
-
+	/* If this is an important peer, free any outstanding timer */
+	imp = important_peerid_map_get(&daemon->important_peerids, &id);
+	if (imp)
+		imp->reconnect_timer = tal_free(imp->reconnect_timer);
+	try_reach_peer(daemon, &id, true);
 	return daemon_conn_read_next(conn, &daemon->master);
 }
 
@@ -1854,6 +2049,70 @@ static struct io_plan *addr_hint(struct io_conn *conn,
 
 	list_add_tail(&daemon->addrhints, &a->list);
 	tal_add_destructor(a, destroy_addrhint);
+
+	return daemon_conn_read_next(conn, &daemon->master);
+}
+
+static struct io_plan *peer_important(struct io_conn *conn,
+				      struct daemon *daemon, const u8 *msg)
+{
+	struct pubkey id;
+	bool important;
+	struct important_peerid *imp;
+
+	if (!fromwire_gossipctl_peer_important(msg, &id, &important))
+		master_badmsg(WIRE_GOSSIPCTL_PEER_IMPORTANT, msg);
+
+	imp = important_peerid_map_get(&daemon->important_peerids, &id);
+	if (important) {
+		if (!imp) {
+			imp = tal(daemon, struct important_peerid);
+			imp->id = id;
+			imp->daemon = daemon;
+			imp->wait_seconds = INITIAL_WAIT_SECONDS;
+			important_peerid_map_add(&daemon->important_peerids,
+						 imp);
+			/* Start trying to reaching it now. */
+			retry_important(imp);
+		}
+	} else {
+		if (imp) {
+			important_peerid_map_del(&daemon->important_peerids,
+						 imp);
+			/* Stop trying to reach it (if we are) */
+			tal_free(find_reaching(daemon, &imp->id));
+		}
+	}
+
+	return daemon_conn_read_next(conn, &daemon->master);
+}
+
+static struct io_plan *peer_disconnected(struct io_conn *conn,
+					 struct daemon *daemon, const u8 *msg)
+{
+	struct pubkey id;
+	struct peer *peer;
+
+	if (!fromwire_gossipctl_peer_disconnected(msg, &id))
+		master_badmsg(WIRE_GOSSIPCTL_PEER_DISCONNECTED, msg);
+
+	peer = find_peer(daemon, &id);
+	if (!peer)
+		status_failed(STATUS_FAIL_INTERNAL_ERROR,
+			      "peer_disconnected unknown peer: %s",
+			      type_to_string(tmpctx, struct pubkey, &id));
+
+	assert(!peer->local);
+
+	status_trace("Forgetting remote peer %s",
+		     type_to_string(tmpctx, struct pubkey, &peer->id));
+
+	tal_free(peer);
+
+	/* If there was a connecting peer waiting, wake it now */
+	peer = find_reconnecting_peer(daemon, &id);
+	if (peer)
+		io_wake(peer);
 
 	return daemon_conn_read_next(conn, &daemon->master);
 }
@@ -2079,6 +2338,9 @@ static struct io_plan *recv_req(struct io_conn *conn, struct daemon_conn *master
 	case WIRE_GOSSIPCTL_INIT:
 		return gossip_init(master, daemon, master->msg_in);
 
+	case WIRE_GOSSIPCTL_ACTIVATE:
+		return gossip_activate(master, daemon, master->msg_in);
+
 	case WIRE_GOSSIPCTL_RELEASE_PEER:
 		return release_peer(conn, daemon, master->msg_in);
 
@@ -2100,11 +2362,17 @@ static struct io_plan *recv_req(struct io_conn *conn, struct daemon_conn *master
 	case WIRE_GOSSIPCTL_HAND_BACK_PEER:
 		return hand_back_peer(conn, daemon, master->msg_in);
 
-	case WIRE_GOSSIPCTL_REACH_PEER:
-		return reach_peer(conn, daemon, master->msg_in);
+	case WIRE_GOSSIPCTL_CONNECT_TO_PEER:
+		return connect_to_peer(conn, daemon, master->msg_in);
 
 	case WIRE_GOSSIPCTL_PEER_ADDRHINT:
 		return addr_hint(conn, daemon, master->msg_in);
+
+	case WIRE_GOSSIPCTL_PEER_IMPORTANT:
+		return peer_important(conn, daemon, master->msg_in);
+
+	case WIRE_GOSSIPCTL_PEER_DISCONNECTED:
+		return peer_disconnected(conn, daemon, master->msg_in);
 
 	case WIRE_GOSSIP_GETPEERS_REQUEST:
 		return get_peers(conn, daemon, master->msg_in);
@@ -2128,6 +2396,7 @@ static struct io_plan *recv_req(struct io_conn *conn, struct daemon_conn *master
 		return handle_outpoint_spent(conn, daemon, master->msg_in);
 
 	/* We send these, we don't receive them */
+	case WIRE_GOSSIPCTL_ACTIVATE_REPLY:
 	case WIRE_GOSSIPCTL_RELEASE_PEER_REPLY:
 	case WIRE_GOSSIPCTL_RELEASE_PEER_REPLYFAIL:
 	case WIRE_GOSSIP_GETNODES_REPLY:
@@ -2137,8 +2406,7 @@ static struct io_plan *recv_req(struct io_conn *conn, struct daemon_conn *master
 	case WIRE_GOSSIP_PING_REPLY:
 	case WIRE_GOSSIP_RESOLVE_CHANNEL_REPLY:
 	case WIRE_GOSSIP_PEER_CONNECTED:
-	case WIRE_GOSSIP_PEER_ALREADY_CONNECTED:
-	case WIRE_GOSSIP_PEER_CONNECTION_FAILED:
+	case WIRE_GOSSIPCTL_CONNECT_TO_PEER_RESULT:
 	case WIRE_GOSSIP_PEER_NONGOSSIP:
 	case WIRE_GOSSIP_GET_UPDATE:
 	case WIRE_GOSSIP_GET_UPDATE_REPLY:
@@ -2164,14 +2432,18 @@ static void master_gone(struct io_conn *unused UNUSED, struct daemon_conn *dc UN
 
 int main(int argc, char *argv[])
 {
+	setup_locale();
+
 	struct daemon *daemon;
 
 	subdaemon_setup(argc, argv);
 
 	daemon = tal(NULL, struct daemon);
 	list_head_init(&daemon->peers);
+	list_head_init(&daemon->reconnecting);
 	list_head_init(&daemon->reaching);
 	list_head_init(&daemon->addrhints);
+	important_peerid_map_init(&daemon->important_peerids);
 	timers_init(&daemon->timers, time_mono());
 	daemon->broadcast_interval = 30000;
 	daemon->last_announce_timestamp = 0;

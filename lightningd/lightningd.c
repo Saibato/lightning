@@ -30,6 +30,7 @@
 #include <lightningd/invoice.h>
 #include <lightningd/jsonrpc.h>
 #include <lightningd/log.h>
+#include <lightningd/onchain_control.h>
 #include <lightningd/options.h>
 #include <lightningd/tor.h>
 #include <onchaind/onchain_wire.h>
@@ -67,8 +68,10 @@ static struct lightningd *new_lightningd(const tal_t *ctx)
 	ld->alias = NULL;
 	ld->rgb = NULL;
 	list_head_init(&ld->connects);
+	list_head_init(&ld->fundchannels);
 	list_head_init(&ld->waitsendpay_commands);
 	list_head_init(&ld->sendpay_commands);
+	list_head_init(&ld->close_commands);
 	ld->wireaddrs = tal_arr(ld, struct wireaddr, 0);
 	ld->portnum = DEFAULT_PORT;
 	timers_init(&ld->timers, time_mono());
@@ -211,8 +214,12 @@ static void shutdown_subdaemons(struct lightningd *ld)
 			tal_free(c);
 		}
 
-		/* Removes itself from list as we free it */
-		tal_free(p);
+		/* Freeing uncommitted channel will free peer. */
+		if (p->uncommitted_channel)
+			tal_free(p->uncommitted_channel);
+		else
+			/* Removes itself from list as we free it */
+			tal_free(p);
 	}
 	db_commit_transaction(ld->wallet->db);
 }
@@ -275,11 +282,22 @@ static void pidfile_create(const struct lightningd *ld)
 	write_all(pid_fd, pid, strlen(pid));
 }
 
+/* Yuck, we need globals here. */
+static int (*io_poll_debug)(struct pollfd *, nfds_t, int);
+static int io_poll_lightningd(struct pollfd *fds, nfds_t nfds, int timeout)
+{
+	db_assert_no_outstanding_statements();
+
+	return io_poll_debug(fds, nfds, timeout);
+}
+
 int main(int argc, char *argv[])
 {
+	setup_locale();
+
 	struct lightningd *ld;
 	bool newdir;
-	u32 first_blocknum;
+	u32 blockheight;
 
 	daemon_setup(argv[0], log_backtrace_print, log_backtrace_exit);
 	ld = new_lightningd(NULL);
@@ -308,11 +326,17 @@ int main(int argc, char *argv[])
 	ld->owned_txfilter = txfilter_new(ld);
 	ld->topology->wallet = ld->wallet;
 
+	/* We do extra checks in io_loop. */
+	io_poll_debug = io_poll_override(io_poll_lightningd);
+
 	/* Set up HSM. */
 	hsm_init(ld, newdir);
 
 	/* Now we know our ID, we can set our color/alias if not already. */
 	setup_color_and_alias(ld);
+
+	/* Set up gossip daemon. */
+	gossip_init(ld);
 
 	/* Everything is within a transaction. */
 	db_begin_transaction(ld->wallet->db);
@@ -332,9 +356,6 @@ int main(int argc, char *argv[])
 	wallet_invoice_autoclean(ld->wallet,
 				 ld->ini_autocleaninvoice_cycle,
 				 ld->ini_autocleaninvoice_expiredby);
-
-	/* Set up gossip daemon. */
-	gossip_init(ld);
 
 	/* Load peers from database */
 	if (!wallet_channels_load_active(ld, ld->wallet))
@@ -357,10 +378,20 @@ int main(int argc, char *argv[])
 	if (!wallet_htlcs_reconnect(ld->wallet, &ld->htlcs_in, &ld->htlcs_out))
 		fatal("could not reconnect htlcs loaded from wallet, wallet may be inconsistent.");
 
-	/* Worst case, scan back to the first lightning deployment */
-	first_blocknum = wallet_first_blocknum(ld->wallet,
-					       get_chainparams(ld)
-					       ->when_lightning_became_cool);
+	/* Get the blockheight we are currently at, UINT32_MAX is used to signal
+	 * an unitialized wallet and that we should start off of bitcoind's
+	 * current height */
+	blockheight = wallet_blocks_height(ld->wallet, UINT32_MAX);
+
+	/* If we were asked to rescan from an absolute height (--rescan < 0)
+	 * then just go there. Otherwise take compute the diff to our current
+	 * height, lowerbounded by 0. */
+	if (ld->config.rescan < 0)
+		blockheight = -ld->config.rescan;
+	else if (blockheight < (u32)ld->config.rescan)
+		blockheight = 0;
+	else if (blockheight != UINT32_MAX)
+		blockheight -= ld->config.rescan;
 
 	db_commit_transaction(ld->wallet->db);
 
@@ -368,7 +399,14 @@ int main(int argc, char *argv[])
 	setup_topology(ld->topology,
 		       &ld->timers,
 		       ld->config.poll_time,
-		       first_blocknum);
+		       blockheight);
+
+	/* Activate gossip daemon. Needs to be after the initialization of
+	 * chaintopology, otherwise we may be asking for uninitialized data. */
+	gossip_activate(ld);
+
+	/* Replay transactions for all running onchainds */
+	onchaind_replay_channels(ld);
 
 	/* Create RPC socket (if any) */
 	setup_jsonrpc(ld, ld->rpc_filename);
