@@ -31,6 +31,7 @@
 #include <lightningd/jsonrpc.h>
 #include <lightningd/log.h>
 #include <lightningd/options.h>
+#include <lightningd/tor.h>
 #include <onchaind/onchain_wire.h>
 #include <signal.h>
 #include <sys/types.h>
@@ -77,7 +78,10 @@ static struct lightningd *new_lightningd(const tal_t *ctx)
 	ld->pidfile = NULL;
 	ld->ini_autocleaninvoice_cycle = 0;
 	ld->ini_autocleaninvoice_expiredby = 86400;
-
+	ld->tor_service_password = tal_arr(ld,char,0);
+	ld->tor_proxyaddr = NULL;
+	ld->tor_serviceaddr = NULL;
+	ld->use_tor_proxy_always = false;
 	return ld;
 }
 
@@ -293,6 +297,9 @@ int main(int argc, char *argv[])
 	/* Ignore SIGPIPE: we look at our write return values*/
 	signal(SIGPIPE, SIG_IGN);
 
+	/* tor support */
+	tor_init(ld);
+
 	/* Make sure we can reach other daemons, and versions match. */
 	test_daemons(ld);
 
@@ -378,6 +385,11 @@ int main(int argc, char *argv[])
 		 type_to_string(tmpctx, struct pubkey, &ld->id),
 		 json_escape(tmpctx, (const char *)ld->alias)->s,
 		 tal_hex(tmpctx, ld->rgb), version());
+
+	/* Show some info about our addresses */
+	size_t n = tal_count(ld->wireaddrs);
+	for (int i = 0; i < n; i++)
+		log_info(ld->log, "Wireaddr[%d] = %s", i, fmt_wireaddr(tmpctx, &(ld->wireaddrs[i])));
 
 	/* Start the peers. */
 	activate_peers(ld);

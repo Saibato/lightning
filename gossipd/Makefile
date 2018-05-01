@@ -17,9 +17,9 @@ LIGHTNINGD_GOSSIP_HEADERS := gossipd/gen_gossip_wire.h \
 	gossipd/gossip_store.h				\
 	gossipd/handshake.h				\
 	gossipd/routing.h				\
+	gossipd/tor.h					\
 	gossipd/broadcast.h
-LIGHTNINGD_GOSSIP_SRC := gossipd/gossip.c	\
-	$(LIGHTNINGD_GOSSIP_HEADERS:.h=.c)
+LIGHTNINGD_GOSSIP_SRC := $(LIGHTNINGD_GOSSIP_HEADERS:.h=.c)
 LIGHTNINGD_GOSSIP_OBJS := $(LIGHTNINGD_GOSSIP_SRC:.c=.o)
 
 # Make sure these depend on everything.
@@ -36,6 +36,7 @@ LIGHTNINGD_HEADERS_GEN += $(LIGHTNINGD_GOSSIP_HEADERS)
 
 # Common source we use.
 GOSSIPD_COMMON_OBJS :=				\
+	common/base32.o				\
 	common/bip32.o				\
 	common/crypto_state.o			\
 	common/crypto_sync.o			\
