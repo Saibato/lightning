@@ -425,7 +425,7 @@ static const struct config testnet_config = {
 	.locktime_blocks = 6,
 
 	/* They can have up to 3 days. */
-	.locktime_max = 3 * 6 * 24,
+	.locktime_max =  576,//3 * 6 * 24,
 
 	/* Testnet can have long runs of empty blocks. */
 	.anchor_onchain_wait = 100,
