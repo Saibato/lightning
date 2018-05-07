@@ -57,7 +57,6 @@ GOSSIPD_COMMON_OBJS :=				\
 	common/status_wire.o			\
 	common/subdaemon.o			\
 	common/timeout.o			\
-	common/tor.o				\
 	common/type_to_string.o			\
 	common/utils.o				\
 	common/utxo.o				\
