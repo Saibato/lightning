@@ -32,6 +32,7 @@
 #include <lightningd/log.h>
 #include <lightningd/onchain_control.h>
 #include <lightningd/options.h>
+#include <lightningd/tor.h>
 #include <onchaind/onchain_wire.h>
 #include <signal.h>
 #include <sys/types.h>
@@ -51,7 +52,7 @@ static struct lightningd *new_lightningd(const tal_t *ctx)
 	ld->dev_debug_subdaemon = NULL;
 	ld->dev_disconnect_fd = -1;
 	ld->dev_subdaemon_fail = false;
-	ld->no_reconnect = false;
+	ld->dev_allow_localhost = false;
 
 	if (getenv("LIGHTNINGD_DEV_MEMLEAK"))
 		memleak_init(ld, backtrace_state);
@@ -70,8 +71,12 @@ static struct lightningd *new_lightningd(const tal_t *ctx)
 	list_head_init(&ld->waitsendpay_commands);
 	list_head_init(&ld->sendpay_commands);
 	list_head_init(&ld->close_commands);
-	ld->wireaddrs = tal_arr(ld, struct wireaddr, 0);
+	ld->proposed_wireaddr = tal_arr(ld, struct wireaddr_internal, 0);
+	ld->proposed_listen_announce = tal_arr(ld, enum addr_listen_announce, 0);
 	ld->portnum = DEFAULT_PORT;
+	ld->listen = true;
+	ld->autolisten = true;
+	ld->reconnect = true;
 	timers_init(&ld->timers, time_mono());
 	ld->topology = new_topology(ld, ld->log);
 	ld->debug_subdaemon_io = NULL;
@@ -79,7 +84,10 @@ static struct lightningd *new_lightningd(const tal_t *ctx)
 	ld->pidfile = NULL;
 	ld->ini_autocleaninvoice_cycle = 0;
 	ld->ini_autocleaninvoice_expiredby = 86400;
-
+	ld->tor_service_password = NULL;
+	ld->tor_proxyaddr = NULL;
+	ld->tor_serviceaddr = NULL;
+	ld->use_tor_proxy_always = false;
 	return ld;
 }
 
@@ -307,6 +315,9 @@ int main(int argc, char *argv[])
 
 	/* Ignore SIGPIPE: we look at our write return values*/
 	signal(SIGPIPE, SIG_IGN);
+
+	/* tor support */
+	tor_init(ld);
 
 	/* Make sure we can reach other daemons, and versions match. */
 	test_daemons(ld);
