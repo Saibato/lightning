@@ -147,7 +147,7 @@ struct daemon {
 	/* Automatically reconnect. */
 	bool reconnect;
 
-	struct wireaddr *tor_proxyaddr;
+	struct addrinfo *tor_proxyaddr;
 	bool use_tor_proxy_always;
 };
 
@@ -1733,6 +1733,7 @@ static struct io_plan *gossip_init(struct daemon_conn *master,
 	struct bitcoin_blkid chain_hash;
 	u32 update_channel_interval;
 	bool dev_allow_localhost;
+	struct wireaddr *tor_proxyaddr;
 
 	if (!fromwire_gossipctl_init(
 		daemon, msg, &daemon->broadcast_interval, &chain_hash,
@@ -1740,7 +1741,7 @@ static struct io_plan *gossip_init(struct daemon_conn *master,
 		&daemon->localfeatures, &daemon->proposed_wireaddr,
 		&daemon->proposed_listen_announce, daemon->rgb,
 		daemon->alias, &update_channel_interval, &daemon->reconnect,
-		&daemon->tor_proxyaddr, &daemon->use_tor_proxy_always,
+		&tor_proxyaddr, &daemon->use_tor_proxy_always,
 		&dev_allow_localhost)) {
 		master_badmsg(WIRE_GOSSIPCTL_INIT, msg);
 	}
@@ -1748,6 +1749,15 @@ static struct io_plan *gossip_init(struct daemon_conn *master,
 	daemon->rstate = new_routing_state(daemon, &chain_hash, &daemon->id,
 					   update_channel_interval * 2,
 					   dev_allow_localhost);
+
+	/* Resolve Tor proxy address if any */
+	if (tor_proxyaddr) {
+		status_trace("Tor proxyaddr : %s",
+			     fmt_wireaddr(tmpctx, tor_proxyaddr));
+		daemon->tor_proxyaddr = wireaddr_to_addrinfo(daemon,
+							     tor_proxyaddr);
+	} else
+		daemon->tor_proxyaddr = NULL;
 
 	/* Load stored gossip messages */
 	gossip_store_load(daemon->rstate, daemon->rstate->store);
