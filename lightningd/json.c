@@ -1,6 +1,7 @@
 #include "json.h"
 #include <arpa/inet.h>
 #include <ccan/str/hex/hex.h>
+#include <ccan/tal/str/str.h>
 #include <common/json.h>
 #include <common/type_to_string.h>
 #include <common/wireaddr.h>
@@ -138,7 +139,38 @@ void json_add_address(struct json_result *response, const char *fieldname,
 		json_add_string(response, "type", "ipv6");
 		json_add_string(response, "address", addrstr);
 		json_add_num(response, "port", addr->port);
+	} else if (addr->type == ADDR_TYPE_TOR_V2) {
+		json_add_string(response, "type", "torv2");
+		json_add_string(response, "address", fmt_wireaddr_without_port(tmpctx, addr));
+		json_add_num(response, "port", addr->port);
+	} else if (addr->type == ADDR_TYPE_TOR_V3) {
+		json_add_string(response, "type", "torv3");
+		json_add_string(response, "address", fmt_wireaddr_without_port(tmpctx, addr));
+		json_add_num(response, "port", addr->port);
 	}
 	json_object_end(response);
 }
 
+void json_add_address_internal(struct json_result *response,
+			       const char *fieldname,
+			       const struct wireaddr_internal *addr)
+{
+	switch (addr->itype) {
+	case ADDR_INTERNAL_SOCKNAME:
+		json_object_start(response, fieldname);
+		json_add_string(response, "type", "local socket");
+		json_add_string(response, "socket", addr->u.sockname);
+		json_object_end(response);
+		return;
+	case ADDR_INTERNAL_ALLPROTO:
+		json_object_start(response, fieldname);
+		json_add_string(response, "type", "any protocol");
+		json_add_num(response, "port", addr->u.port);
+		json_object_end(response);
+		return;
+	case ADDR_INTERNAL_WIREADDR:
+		json_add_address(response, fieldname, &addr->u.wireaddr);
+		return;
+	}
+	abort();
+}
