@@ -293,6 +293,17 @@ bool wireaddr_from_hostname(struct wireaddr *addr, const char *hostname,
 		return true;
 	}
 
+/* FIXME SAIBATO here we need use_tor_proxy_always
+ or a flag dont use normal DNS if tor is enabled
+ we should resole instead over the tor proxy
+ It's any way a blocking call so we can do the io over the proxy and wait until
+ io_loop return's 
+ for now we disable in this PR with TOR_COMPILE we dont want to leak ^^
+*/
+	#ifndef TOR_LEAKSAFE_COMPILE
+	return res;
+	#endif
+
 	memset(&hints, 0, sizeof(hints));
 	hints.ai_family = AF_UNSPEC;
 	hints.ai_socktype = SOCK_STREAM;
