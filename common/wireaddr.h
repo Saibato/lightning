@@ -28,10 +28,10 @@ struct sockaddr_un;
  *         onion service addresses. Encodes: `[32:32_byte_ed25519_pubkey] || [2:checksum] || [1:version]`.
  *             where `checksum = sha3(".onion checksum" | pubkey || version)[:2]`
  */
-
+#define FQDN_ADDRLEN 255
 #define	TOR_V2_ADDRLEN 10
 #define	TOR_V3_ADDRLEN 35
-#define	LARGEST_ADDRLEN TOR_V3_ADDRLEN
+#define	LARGEST_ADDRLEN FQDN_ADDRLEN
 
 enum wire_addr_type {
 	ADDR_TYPE_PADDING = 0,
