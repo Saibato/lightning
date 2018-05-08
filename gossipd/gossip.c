@@ -2031,7 +2031,8 @@ static void try_reach_peer(struct daemon *daemon, const struct pubkey *id,
 					daemon->rstate,
 					id);
 
-	if (!a)
+	/* FIXME: Do DNS queries via SOCKS5 */
+	if (!a && !daemon->use_proxy_always)
 		a = seed_resolve_addr(tmpctx, id, 9735);
 
 	if (!a) {
