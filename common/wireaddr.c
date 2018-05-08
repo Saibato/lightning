@@ -264,7 +264,7 @@ static bool separate_address_and_port(const tal_t *ctx, const char *arg,
 }
 
 bool wireaddr_from_hostname(struct wireaddr *addr, const char *hostname,
-			    const u16 port, const char **err_msg)
+			    const u16 port, bool dns_ok, const char **err_msg)
 {
 	struct sockaddr_in6 *sa6;
 	struct sockaddr_in *sa4;
@@ -298,6 +298,8 @@ bool wireaddr_from_hostname(struct wireaddr *addr, const char *hostname,
 	hints.ai_socktype = SOCK_STREAM;
 	hints.ai_protocol = 0;
 	hints.ai_flags = AI_ADDRCONFIG;
+	if (!dns_ok)
+		hints.ai_flags = AI_NUMERICHOST;
 	gai_err = getaddrinfo(hostname, tal_fmt(tmpctx, "%d", port),
 			      &hints, &addrinfo);
 	if (gai_err != 0) {
@@ -322,7 +324,7 @@ bool wireaddr_from_hostname(struct wireaddr *addr, const char *hostname,
 }
 
 bool parse_wireaddr(const char *arg, struct wireaddr *addr, u16 defport,
-		    const char **err_msg)
+		    bool dns_ok, const char **err_msg)
 {
 	struct in6_addr v6;
 	struct in_addr v4;
@@ -355,7 +357,7 @@ bool parse_wireaddr(const char *arg, struct wireaddr *addr, u16 defport,
 
 	/* Resolve with getaddrinfo */
 	if (!res)
-		res = wireaddr_from_hostname(addr, ip, port, err_msg);
+		res = wireaddr_from_hostname(addr, ip, port, dns_ok, err_msg);
 
 finish:
 	if (!res && err_msg && !*err_msg)
@@ -364,7 +366,8 @@ finish:
 }
 
 bool parse_wireaddr_internal(const char *arg, struct wireaddr_internal *addr,
-			     u16 port, bool wildcard_ok, const char **err_msg)
+			     u16 port, bool wildcard_ok, bool dns_ok,
+			     const char **err_msg)
 {
 	u16 wildport;
 	char *ip;
@@ -394,7 +397,7 @@ bool parse_wireaddr_internal(const char *arg, struct wireaddr_internal *addr,
 	}
 
 	addr->itype = ADDR_INTERNAL_WIREADDR;
-	return parse_wireaddr(arg, &addr->u.wireaddr, port, err_msg);
+	return parse_wireaddr(arg, &addr->u.wireaddr, port, dns_ok, err_msg);
 }
 
 void wireaddr_from_sockname(struct wireaddr_internal *addr,
