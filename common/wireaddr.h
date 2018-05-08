@@ -96,6 +96,7 @@ bool wireaddr_is_wildcard(const struct wireaddr *addr);
 enum wireaddr_internal_type {
 	ADDR_INTERNAL_SOCKNAME,
 	ADDR_INTERNAL_ALLPROTO,
+	ADDR_INTERNAL_AUTOTOR,
 	ADDR_INTERNAL_WIREADDR,
 };
 
@@ -107,6 +108,8 @@ struct wireaddr_internal {
 		struct wireaddr wireaddr;
 		/* ADDR_INTERNAL_ALLPROTO */
 		u16 port;
+		/* ADDR_INTERNAL_AUTOTOR */
+		struct wireaddr torservice;
 		/* ADDR_INTERNAL_WIREADDR */
 		char sockname[108];
 	} u;
