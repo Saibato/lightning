@@ -121,17 +121,17 @@ static struct io_plan *io_tor_connect_after_resp_to_connect(struct io_conn
 	/* make the V5 request */
 	reach->hlen = strlen(reach->host);
 	reach->buffer[0] = SOCKS_V5;
-	reach->buffer[1] = SOCKS_CONNECT;
+	reach->buffer[1] = 0xF0; // make a resolve reqeust
 	reach->buffer[2] = 0;
-	reach->buffer[3] = SOCKS_DOMAIN;
+	reach->buffer[3] = 1; // 4 IPV6 SOCKS_DOMAIN;
 	reach->buffer[4] = reach->hlen;
 
-	memcpy(reach->buffer + SOCK_REQ_V5_LEN, reach->host, reach->hlen);
-	memcpy(reach->buffer + SOCK_REQ_V5_LEN + strlen(reach->host),
+	memcpy(reach->buffer + 4, reach->host, reach->hlen);
+	memcpy(reach->buffer + 4 + strlen(reach->host),
 	       &(reach->port), sizeof reach->port);
 
 	return io_write(conn, reach->buffer,
-			SOCK_REQ_V5_HEADER_LEN + reach->hlen,
+			SOCK_REQ_V5_HEADER_LEN-1 + reach->hlen,
 			io_tor_connect_after_req_host, reach);
 }
 
