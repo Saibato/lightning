@@ -211,6 +211,8 @@ char *fmt_wireaddr_without_port(const tal_t * ctx, const struct wireaddr *a)
 		break;
 	}
 
+	return tal_fmt(ctx, "%s", (char *)a->addr);
+
 	hex = tal_hexstr(ctx, a->addr, a->addrlen);
 	ret = tal_fmt(ctx, "Unknown type %u %s", a->type, hex);
 	tal_free(hex);
