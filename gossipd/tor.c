@@ -16,19 +16,22 @@
 #define SOCKS_NOAUTH		0
 #define SOCKS_ERROR 	 0xff
 #define SOCKS_CONNECT		1
+#define SOCKS_RESOLVE	 0xF0
 #define SOCKS_TYP_IPV4		1
 #define SOCKS_DOMAIN		3
 #define SOCKS_TYP_IPV6		4
 #define SOCKS_V5            5
 
-#define MAX_SIZE_OF_SOCKS5_REQ_OR_RESP 255
-#define SIZE_OF_RESPONSE 		4
-#define SIZE_OF_REQUEST 		3
-#define SIZE_OF_IPV4_RESPONSE 	6
-#define SIZE_OF_IPV6_RESPONSE 	18
-#define SOCK_REQ_METH_LEN		3
-#define SOCK_REQ_V5_LEN			5
-#define SOCK_REQ_V5_HEADER_LEN	7
+#define MAX_SIZE_OF_SOCKS5_REQ_OR_RESP	255
+#define SIZE_OF_RESPONSE 				4
+#define SIZE_OF_REQUEST 				3
+#define SIZE_OF_IPV4_RESPONSE 			6
+#define SIZE_OF_IPV6_RESPONSE 			18
+#define SOCK_REQ_METH_LEN				3
+#define SOCK_REQ_V5_LEN					5
+#define SOCK_REQ_V5_HEADER_LEN			7
+#define SOCK_RESOLVE_REQ_V5_LEN			4
+#define SOCK_RESOLVE_REQ_V5_HEADER_LEN	6
 
 /* some crufts can not forward ipv6*/
 #undef BIND_FIRST_TO_IPV6
@@ -118,20 +121,20 @@ static struct io_plan *io_tor_connect_after_resp_to_connect(struct io_conn
 		status_trace("Connected out for %s error", reach->host);
 		return io_close(conn);
 	}
-	/* make the V5 request */
+	/* make the V5 resolve request */
 	reach->hlen = strlen(reach->host);
 	reach->buffer[0] = SOCKS_V5;
-	reach->buffer[1] = 0xF0; // make a resolve reqeust
+	reach->buffer[1] = SOCKS_RESOLVE; 
 	reach->buffer[2] = 0;
-	reach->buffer[3] = 1; // 4 IPV6 SOCKS_DOMAIN;
+	reach->buffer[3] = SOCKS_TYP_IPV4;
 	reach->buffer[4] = reach->hlen;
 
-	memcpy(reach->buffer + 4, reach->host, reach->hlen);
-	memcpy(reach->buffer + 4 + strlen(reach->host),
+	memcpy(reach->buffer + SOCK_RESOLVE_REQ_V5_LEN, reach->host, reach->hlen);
+	memcpy(reach->buffer + SOCK_RESOLVE_REQ_V5_LEN + strlen(reach->host),
 	       &(reach->port), sizeof reach->port);
 
 	return io_write(conn, reach->buffer,
-			SOCK_REQ_V5_HEADER_LEN-1 + reach->hlen,
+			SOCK_RESOLVE_REQ_V5_HEADER_LEN + reach->hlen,
 			io_tor_connect_after_req_host, reach);
 }
 
