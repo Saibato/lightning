@@ -1940,7 +1940,7 @@ seed_resolve_addr(const tal_t *ctx, const struct pubkey *id, const u16 port)
 	bech32_push_bits(&data, der, PUBKEY_DER_LEN*8);
 	bech32_encode(bech32, "ln", data, tal_count(data), sizeof(bech32));
 	addr = tal_fmt(ctx, "%s.lseed.bitcoinstats.com", bech32);
-	//test adddr   addr = tal_fmt(ctx, "%s", "lseed.bitcoinstats.com");
+	//addr = tal_fmt(ctx, "%s", "lseed.bitcoinstats.com");
 	status_trace("Resolving %s", addr);
 
 	a = tal(ctx, struct addrhint);

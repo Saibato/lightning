@@ -38,12 +38,17 @@ struct reaching_socks {
 	size_t hlen;
 	in_port_t port;
 	char *host;
+	struct wireaddr resolved;
 	struct reaching *reach;
 };
 
 static struct io_plan *connect_finish2(struct io_conn *conn,
 				       struct reaching_socks *reach)
 {
+	reach->resolved.type = ADDR_TYPE_IPV6;
+	reach->resolved.addrlen = 16;
+	memcpy(reach->resolved.addr, &reach->buffer[4], reach->resolved.addrlen);
+
 	status_trace("Now try LN connect out for host %s", reach->host);
 	return connection_out(conn, reach->reach);
 }
@@ -62,8 +67,11 @@ static struct io_plan *connect_finish(struct io_conn *conn,
 				       &connect_finish2, reach);
 
 		} else if ( reach->buffer[3] == SOCKS_TYP_IPV4) {
-			status_trace("Now try LN connect out for host %s",
-				     reach->host);
+			reach->resolved.type = ADDR_TYPE_IPV4;
+			reach->resolved.addrlen = 4;
+			memcpy(reach->resolved.addr, &reach->buffer[4], reach->resolved.addrlen);
+			status_trace("Now try LN connect out for host %s %s",
+				     reach->host, fmt_wireaddr_without_port(tmpctx, &reach->resolved));
 			return connection_out(conn, reach->reach);
 		} else {
 			status_trace

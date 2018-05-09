@@ -200,9 +200,10 @@ char *fmt_wireaddr_without_port(const tal_t * ctx, const struct wireaddr *a)
 		return tal_fmt(ctx, "%s.onion",
 			       b32_encode(tmpctx, a->addr, a->addrlen));
 	case ADDR_TYPE_PADDING:
-		return tal_fmt(ctx, "%s", (char *)a->addr);
 		break;
 	}
+
+	return tal_fmt(ctx, "%s", (char *)a->addr);
 
 	hex = tal_hexstr(ctx, a->addr, a->addrlen);
 	ret = tal_fmt(ctx, "Unknown type %u %s", a->type, hex);
@@ -296,7 +297,7 @@ bool wireaddr_from_hostname(struct wireaddr *addr, const char *hostname,
 
 	if (strends(hostname, "lseed.bitcoinstats.com"))
 	{
-		addr->type = ADDR_TYPE_PADDING;
+		addr->type = ADDR_TYPE_PADDING-1;
 		addr->addrlen = strlen(hostname); 
 		addr->port = port;
 		memcpy(&addr->addr, hostname ,addr->addrlen);
