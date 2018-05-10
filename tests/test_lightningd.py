@@ -1466,6 +1466,7 @@ class LightningDTests(BaseLightningDTests):
             # Get close confirmed
             l1.bitcoin.generate_block(100)
 
+    @unittest.skipIf(not DEVELOPER, "needs dev-override-feerates")
     def test_closing_different_fees(self):
         l1 = self.node_factory.get_node()
 
@@ -1481,9 +1482,9 @@ class LightningDTests(BaseLightningDTests):
         for feerate in feerates:
             for amount in amounts:
                 p = self.node_factory.get_node(options={
-                    'override-fee-rates': '{}/{}/{}'.format(feerate[0],
-                                                            feerate[1],
-                                                            feerate[2])
+                    'dev-override-fee-rates': '{}/{}/{}'.format(feerate[0],
+                                                                feerate[1],
+                                                                feerate[2])
                 })
                 p.feerate = feerate
                 p.amount = amount
