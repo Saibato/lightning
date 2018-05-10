@@ -19,7 +19,6 @@ BITCOIND_CONFIG = {
 
 
 LIGHTNINGD_CONFIG = {
-    "bitcoind-poll": "1s",
     "log-level": "debug",
     "cltv-delta": 6,
     "cltv-final": 5,
@@ -30,7 +29,7 @@ LIGHTNINGD_CONFIG = {
 DEVELOPER = os.getenv("DEVELOPER", "0") == "1"
 
 
-def wait_for(success, timeout=30, interval=0.1):
+def wait_for(success, timeout=60, interval=0.1):
     start_time = time.time()
     while not success() and time.time() < start_time + timeout:
         time.sleep(interval)
@@ -281,6 +280,7 @@ class LightningD(TailableProc):
                 f.write(seed)
         if DEVELOPER:
             self.opts['dev-broadcast-interval'] = 1000
+            self.opts['dev-bitcoind-poll'] = 1
             # lightningd won't announce non-routable addresses by default.
             self.opts['dev-allow-localhost'] = None
         self.prefix = 'lightningd-%d' % (node_id)
