@@ -280,6 +280,10 @@ static void update_feerates(struct bitcoind *bitcoind,
 	for (size_t i = 0; i < NUM_FEERATES; i++) {
 		u32 feerate = satoshi_per_kw[i];
 
+		/* If estimatefee failed, don't do anything. */
+		if (!feerate)
+			continue;
+
 		if (feerate < feerate_floor())
 			feerate = feerate_floor();
 
