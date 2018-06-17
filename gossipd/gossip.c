@@ -738,14 +738,20 @@ static u8 *create_node_announcement(const tal_t *ctx, struct daemon *daemon,
 	u8 *features = NULL;
 	u8 *addresses = tal_arr(ctx, u8, 0);
 	u8 *announcement;
+	enum wire_addr_type itype;
+	struct wireaddr *addr;
 	size_t i;
 	if (!sig) {
 		sig = tal(ctx, secp256k1_ecdsa_signature);
 		memset(sig, 0, sizeof(*sig));
 	}
-	for (i = 0; i < tal_count(daemon->announcable); i++)
-		towire_wireaddr(&addresses, &daemon->announcable[i]);
-
+	itype = 0;
+	for (i = 0; i < tal_count(daemon->announcable); i++) {
+		addr = (struct wireaddr *)addresses + i;
+		if (!(itype && addr->type))
+			towire_wireaddr(&addresses, &daemon->announcable[i]);
+		itype |= addr->type;
+		}
 	announcement =
 	    towire_node_announcement(ctx, sig, features, timestamp,
 				     &daemon->id, daemon->rgb, daemon->alias,
