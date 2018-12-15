@@ -1060,9 +1060,6 @@ static struct wireaddr_internal *setup_listeners(const tal_t *ctx,
 		if (!(proposed_listen_announce[i] & ADDR_LISTEN))
 			continue;
 
-		if (!(proposed_listen_announce[i] & ADDR_ANNOUNCE))
-			continue;
-
 		if (proposed_wireaddr[i].itype != ADDR_INTERNAL_AUTOTOR)
 			continue;
 
