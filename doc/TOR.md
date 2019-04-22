@@ -273,16 +273,28 @@ or `--addr=your.onionAddress:port` if you are NOT on an internal network.
 
 #### Case #5 c-lightning has no public IP address, and has no fixed Tor hidden service address
 
-In this case it is difficult to track the node.
-You specify just:
+In the case you need a bit more difficult to track node
+you can specify:
+```
+--bind-addr=127.0.0.1:port --bind-addr=autotor:127.0.0.1:9051
+```
+In the `lightningd` command line.
+
+Other nodes will not be able to `connect` to you unless you communicate them 
+the new temp onion address you just created.
+You will find your .onion address if you #DEFINE SUPERVERBOSE in the logs
+or if you ask the Tor service api and do a getinfo onions/detached to list your temp onions
+
+In the case you want to be more easily tracked and make "Tha Agencies" happy the mode
+you specify is:
 ```
 --bind-addr=yourInternalIPAddress:port --addr=autotor:127.0.0.1:9051
 ```
 In the `lightningd` command line.
 
-Other nodes will not be able to `connect` to you unless you communicate them how to reach you.
-You will find your .onion address with the command `lightning-cli getinfo` and the other nodes will 
-be able to connect to it through the 9735 port.
+with the command `lightning-cli getinfo` you can read out the .onion address.
+
+In both cases other nodes are able to connect to your node through the 9735 port.
 
 #### Case #6 c-lightning has a public IP address and a fixed Tor V3 service address and a Tor V2 service address
 
