@@ -428,7 +428,8 @@ static void config_register_opts(struct lightningd *ld)
 
 	opt_register_noarg("--disable-dns", opt_set_invbool, &ld->config.use_dns,
 			   "Disable DNS lookups of peers");
-
+	opt_register_noarg("--enable-getinfo-all", opt_set_bool, &ld->config.getinfo_all,
+			   "Ensable superverbose getinfo");
 #if DEVELOPER
 	opt_register_arg("--dev-max-funding-unconfirmed-blocks",
 			 opt_set_u32, opt_show_u32,
@@ -550,6 +551,8 @@ static const struct config testnet_config = {
 
 	/* Sets min_effective_htlc_capacity - at 1000$/BTC this is 10ct */
 	.min_capacity_sat = 10000,
+
+	.getinfo_all = false,
 };
 
 /* aka. "Dude, where's my coins?" */
@@ -616,6 +619,8 @@ static const struct config mainnet_config = {
 
 	/* Sets min_effective_htlc_capacity - at 1000$/BTC this is 10ct */
 	.min_capacity_sat = 10000,
+
+	.getinfo_all = false,
 };
 
 static void check_config(struct lightningd *ld)

@@ -1310,6 +1310,13 @@ static struct command_result *json_getinfo(struct command *cmd,
             json_add_address(response, NULL, cmd->ld->announcable+i);
         json_array_end(response);
 
+        /* These are the addresses we're not announcing */
+		if (cmd->ld->config.getinfo_all) {
+			json_array_start(response, "unannounced address");
+			for (size_t i = 0; i < tal_count(cmd->ld->not_announcable); i++)
+				json_add_address(response, NULL, cmd->ld->not_announcable+i);
+			json_array_end(response);
+		}
         /* This is what we're actually bound to. */
         json_array_start(response, "binding");
         for (size_t i = 0; i < tal_count(cmd->ld->binding); i++)

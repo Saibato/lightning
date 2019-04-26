@@ -325,7 +325,8 @@ static void connect_init_done(struct subd *connectd,
 
 	if (!fromwire_connectctl_init_reply(ld, reply,
 					    &ld->binding,
-					    &ld->announcable))
+					    &ld->announcable,
+					    &ld->not_announcable))
 		fatal("Bad connectctl_activate_reply: %s",
 		      tal_hex(reply, reply));
 

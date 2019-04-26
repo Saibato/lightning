@@ -14,6 +14,8 @@ gossipctl_init,,alias,32*u8
 gossipctl_init,,update_channel_interval,u32
 gossipctl_init,,num_announcable,u16
 gossipctl_init,,announcable,num_announcable*struct wireaddr
+gossipctl_init,,num_not_announcable,u16
+gossipctl_init,,not_announcable,num_not_announcable*struct wireaddr
 gossipctl_init,,dev_gossip_time,?u32
 gossipctl_init,,dev_unknown_channel_satoshis,?struct amount_sat
 

@@ -116,6 +116,9 @@ struct daemon {
 
 	/* What addresses we can actually announce. */
 	struct wireaddr *announcable;
+	/* What addresses we not actually announce. */
+	struct wireaddr *not_announcable;
+
 };
 
 /* This represents each peer we're gossiping with */
@@ -1961,6 +1964,7 @@ static struct io_plan *gossip_init(struct io_conn *conn,
 				      * (unless --dev-channel-update-interval) */
 				     &update_channel_interval,
 				     &daemon->announcable,
+				     &daemon->not_announcable,
 				     &dev_gossip_time,
 				     &dev_unknown_channel_satoshis)) {
 		master_badmsg(WIRE_GOSSIPCTL_INIT, msg);

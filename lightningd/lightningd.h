@@ -70,6 +70,9 @@ struct config {
 
 	/* Minimal amount of effective funding_satoshis for accepting channels */
 	u64 min_capacity_sat;
+
+	/* supervebose getconfig flag */
+	bool getinfo_all;
 };
 
 struct lightningd {
@@ -134,6 +137,7 @@ struct lightningd {
 	/* Actual bindings and announcables from gossipd */
 	struct wireaddr_internal *binding;
 	struct wireaddr *announcable;
+	struct wireaddr *not_announcable;
 
 	/* Bearer of all my secrets. */
 	int hsm_fd;

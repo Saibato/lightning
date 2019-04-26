@@ -148,6 +148,10 @@ struct daemon {
 
 	/* File descriptors to listen on once we're activated. */
 	struct listen_fd *listen_fds;
+
+	/* supervebose getconfig flag */
+	bool getinfo_all;
+
 };
 
 /* Peers we're trying to reach: we iterate through addrs until we succeed
@@ -967,7 +971,8 @@ static struct wireaddr_internal *setup_listeners(const tal_t *ctx,
 						    announce or both */
 						 const enum addr_listen_announce *proposed_listen_announce,
 						 const char *tor_password,
-						 struct wireaddr **announcable)
+						 struct wireaddr **announcable,
+						 struct wireaddr **not_announcable)
 {
 	struct sockaddr_un addrun;
 	int fd;
@@ -976,6 +981,7 @@ static struct wireaddr_internal *setup_listeners(const tal_t *ctx,
 	/* Start with empty arrays, for tal_arr_expand() */
 	binding = tal_arr(ctx, struct wireaddr_internal, 0);
 	*announcable = tal_arr(ctx, struct wireaddr, 0);
+	*not_announcable = tal_arr(ctx, struct wireaddr, 0);
 
 	/* Add addresses we've explicitly been told to *first*: implicit
 	 * addresses will be discarded then if we have multiple. */
@@ -1085,10 +1091,11 @@ static struct wireaddr_internal *setup_listeners(const tal_t *ctx,
 		if (proposed_wireaddr[i].itype != ADDR_INTERNAL_AUTOTOR)
 			continue;
 		if (!(proposed_listen_announce[i] & ADDR_ANNOUNCE)) {
+			add_announcable(not_announcable,
 				tor_autoservice(tmpctx,
 						&proposed_wireaddr[i].u.torservice,
 						tor_password,
-						binding);
+						binding));
 			continue;
 		};
 		add_announcable(announcable,
@@ -1100,6 +1107,7 @@ static struct wireaddr_internal *setup_listeners(const tal_t *ctx,
 
 	/* Sort and uniquify. */
 	finalize_announcable(announcable);
+	finalize_announcable(not_announcable);
 
 	return binding;
 }
@@ -1117,6 +1125,7 @@ static struct io_plan *connect_init(struct io_conn *conn,
 	struct wireaddr_internal *proposed_wireaddr;
 	enum addr_listen_announce *proposed_listen_announce;
 	struct wireaddr *announcable;
+	struct wireaddr *not_announcable;
 	char *tor_password;
 
 	/* Fields which require allocation are allocated off daemon */
@@ -1159,7 +1168,8 @@ static struct io_plan *connect_init(struct io_conn *conn,
 				  proposed_wireaddr,
 				  proposed_listen_announce,
 				  tor_password,
-				  &announcable);
+				  &announcable,
+				  &not_announcable);
 
 	/* Free up old allocations */
 	tal_free(proposed_wireaddr);
@@ -1170,7 +1180,8 @@ static struct io_plan *connect_init(struct io_conn *conn,
 	daemon_conn_send(daemon->master,
 			 take(towire_connectctl_init_reply(NULL,
 							   binding,
-							   announcable)));
+							   announcable,
+							   not_announcable)));
 
 	/* Read the next message. */
 	return daemon_conn_read_next(conn, daemon->master);

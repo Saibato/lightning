@@ -19,6 +19,8 @@ connectctl_init_reply,,num_bindings,u16
 connectctl_init_reply,,bindings,num_bindings*struct wireaddr_internal
 connectctl_init_reply,,num_announcable,u16
 connectctl_init_reply,,announcable,num_announcable*struct wireaddr
+connectctl_init_reply,,num_not_announcable,u16
+connectctl_init_reply,,not_announcable,num_not_announcable*struct wireaddr
 
 # Activate the connect daemon, so others can connect.
 connectctl_activate,2025
