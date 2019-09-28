@@ -7,6 +7,7 @@
 #include <ccan/str/hex/hex.h>
 #include <ccan/tal/grab_file/grab_file.h>
 #include <ccan/tal/str/str.h>
+#include <common/base64.h>
 #include <common/type_to_string.h>
 #include <common/utils.h>
 #include <common/wireaddr.h>
@@ -21,14 +22,11 @@
 #include <unistd.h>
 #include <wire/wire.h>
 
-#define MAX_TOR_COOKIE_LEN 32
-#define MAX_TOR_SERVICE_READBUFFER_LEN 255
-#define MAX_TOR_ONION_V2_ADDR_LEN 16
-#define MAX_TOR_ONION_V3_ADDR_LEN 56
 
 static void *buf_resize(struct membuf *mb, void *buf, size_t len)
 {
 	tal_resize(&buf, len);
+
 	return buf;
 }
 
@@ -43,6 +41,27 @@ static void tor_send_cmd(struct rbuf *rbuf, const char *cmd)
 	if (!write_all(rbuf->fd, "\r\n", 2))
 		status_failed(STATUS_FAIL_INTERNAL_ERROR,
 			      "Writing CRLF to Tor socket");
+}
+
+static char *tor_response_line_wfail(struct rbuf *rbuf)
+{
+	char *line;
+
+	while ((line = rbuf_read_str(rbuf, '\n')) != NULL) {
+		status_io(LOG_IO_IN, "torcontrol", line, strlen(line));
+
+		/* Weird response */
+		if (!strstarts(line, "250") && !strstarts(line, "550"))
+			status_failed(STATUS_FAIL_INTERNAL_ERROR,
+				      "Tor returned '%s'", line);
+
+		/* Last line */
+		if (strstarts(line, "250 ") || strstarts(line, "550 "))
+			break;
+
+		return line + 4;
+	}
+	return line + 4;
 }
 
 static char *tor_response_line(struct rbuf *rbuf)
@@ -66,6 +85,7 @@ static char *tor_response_line(struct rbuf *rbuf)
 	return NULL;
 }
 
+
 static void discard_remaining_response(struct rbuf *rbuf)
 {
 	while (tor_response_line(rbuf));
@@ -79,8 +99,8 @@ static struct wireaddr *make_onion(const tal_t *ctx,
 	char *line;
 	struct wireaddr *onion;
 
-/* Now that V3 is out of Beta default to V3 autoservice onions if version is above 0.4
-*/
+	/* Now that V3 is out of Beta default to V3 autoservice onions if version is above 0.4
+	*/
 	tor_send_cmd(rbuf, "PROTOCOLINFO 1");
 
 	while ((line = tor_response_line(rbuf)) != NULL) {
@@ -129,6 +149,48 @@ static struct wireaddr *make_onion(const tal_t *ctx,
 		discard_remaining_response(rbuf);
 		return onion;
 	}
+	status_failed(STATUS_FAIL_INTERNAL_ERROR,
+		      "Tor didn't give us a ServiceID");
+}
+
+static struct wireaddr *make_fixed_onion(const tal_t *ctx,
+				   struct rbuf *rbuf,
+				   const struct wireaddr *local, const char *blob, u16 port)
+{
+	char *line;
+	struct wireaddr *onion;
+	char *blob64;
+
+
+	blob64 = b64_encode(tmpctx,(char *) blob, 64);
+
+	tor_send_cmd(rbuf,
+			  tal_fmt(tmpctx, "ADD_ONION ED25519-V3:%s Port=%d,%s Flags=DiscardPK",
+					blob64, port, fmt_wireaddr(tmpctx, local)));
+
+	while ((line = tor_response_line_wfail(rbuf)) != NULL) {
+		const char *name;
+		if (line && strstarts(line, "Onion address collision"))
+			status_failed(STATUS_FAIL_INTERNAL_ERROR,
+				      "Tor address in use\n");
+
+		if (!strstarts(line, "ServiceID="))
+			continue;
+		line += strlen("ServiceID=");
+		/* Strip the trailing CR */
+		if (strchr(line, '\r'))
+			*strchr(line, '\r') = '\0';
+
+		name = tal_fmt(tmpctx, "%s.onion", line);
+		onion = tal(ctx, struct wireaddr);
+		if (!parse_wireaddr(name, onion, DEFAULT_PORT, false, NULL))
+			status_failed(STATUS_FAIL_INTERNAL_ERROR,
+				      "Tor gave bad onion name '%s'", name);
+		//status_info("Static Tor service onion address: \"%s:%d,%s\"from b64blob %s", name, DEFAULT_PORT ,fmt_wireaddr(tmpctx, local), blob);
+		discard_remaining_response(rbuf);
+		return onion;
+	}
+	return NULL;
 	status_failed(STATUS_FAIL_INTERNAL_ERROR,
 		      "Tor didn't give us a ServiceID");
 }
@@ -194,6 +256,9 @@ static void negotiate_auth(struct rbuf *rbuf, const char *tor_password)
 					     tal_hexstr(tmpctx,
 							contents,
 							tal_count(contents)-1)));
+			//status_info("coo:  %s",tal_hexstr(tmpctx,
+			//				contents,
+			//				tal_count(contents)-1));
 			discard_remaining_response(rbuf);
 			return;
 		}
@@ -260,6 +325,48 @@ struct wireaddr *tor_autoservice(const tal_t *ctx,
 	//read_partial to keep it open until LN drops
 	//FIXME: SAIBATO we might not want to close this conn
 	close(fd);
+
+	return onion;
+}
+
+
+struct wireaddr *tor_fixed_service(const tal_t *ctx,
+				 const struct wireaddr *tor_serviceaddr,
+				 const char *tor_password,
+				 const char *blob,
+				 const struct wireaddr *bind,
+				 const u8 index)
+{
+	int fd;
+	const struct wireaddr *laddr;
+	struct wireaddr *onion;
+	struct addrinfo *ai_tor;
+	struct rbuf rbuf;
+	char *buffer;
+
+	laddr = bind;
+	ai_tor = wireaddr_to_addrinfo(tmpctx, tor_serviceaddr);
+
+	fd = socket(ai_tor->ai_family, SOCK_STREAM, 0);
+	if (fd < 0)
+		err(1, "Creating stream socket for Tor");
+
+	if (connect(fd, ai_tor->ai_addr, ai_tor->ai_addrlen) != 0)
+		err(1, "Connecting stream socket to Tor service");
+
+	buffer = tal_arr(tmpctx, char, rbuf_good_size(fd));
+	rbuf_init(&rbuf, fd, buffer, tal_count(buffer), buf_resize);
+
+	negotiate_auth(&rbuf, tor_password);
+
+	onion = make_fixed_onion(ctx, &rbuf, laddr, blob, DEFAULT_PORT);
+	memset((void *)blob, 0, sizeof(*blob));
+	/*on the other hand we can stay connected until ln finish to keep onion alive and then vanish
+	* because when we run with Detach flag as we now do every start of LN creates a new addr while the old
+	* stays valid until reboot this might not be desired so we can also drop Detach and use the
+	* read_partial to keep it open until LN drops
+	* DO NOT CLOSE FD TO KEEP ADDRESS ALIVE AS WE DO NOT DETACH WITH STATIC ADDRESS
+	*/
 
 	return onion;
 }
