@@ -43,6 +43,7 @@ struct sockaddr_un;
 #define	TOR_V2_ADDRLEN 10
 #define	TOR_V3_ADDRLEN 35
 #define	LARGEST_ADDRLEN TOR_V3_ADDRLEN
+#define	TOR_V3_BLOBLEN 64
 
 enum wire_addr_type {
 	ADDR_TYPE_IPV4 = 1,
@@ -110,17 +111,19 @@ enum wireaddr_internal_type {
 	ADDR_INTERNAL_AUTOTOR,
 	ADDR_INTERNAL_FORPROXY,
 	ADDR_INTERNAL_WIREADDR,
+	ADDR_INTERNAL_STATICTOR,
 };
 
 /* For internal use, where we can also supply a local socket, wildcard. */
 struct wireaddr_internal {
 	enum wireaddr_internal_type itype;
+	char blob[TOR_V3_BLOBLEN +1];
 	union {
 		/* ADDR_INTERNAL_WIREADDR */
 		struct wireaddr wireaddr;
 		/* ADDR_INTERNAL_ALLPROTO */
 		u16 port;
-		/* ADDR_INTERNAL_AUTOTOR */
+		/* ADDR_INTERNAL_AUTOTOR/STATICTOR service address */
 		struct wireaddr torservice;
 		/* ADDR_INTERNAL_FORPROXY */
 		struct unresolved {

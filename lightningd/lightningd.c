@@ -729,7 +729,6 @@ int main(int argc, char *argv[])
 	/*~ Our default color and alias are derived from our node id, so we
 	 * can only set those now (if not set by config options). */
 	setup_color_and_alias(ld);
-
 	/*~ Set up connect daemon: this manages receiving and making
 	 * TCP connections.  It needs to talk to the gossip daemon
 	 * which knows (via node_announcement messages) the public

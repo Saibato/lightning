@@ -56,6 +56,7 @@
 #include <netdb.h>
 #include <netinet/in.h>
 #include <secp256k1_ecdh.h>
+#include <sodium.h>
 #include <sodium/randombytes.h>
 #include <stdarg.h>
 #include <sys/socket.h>
@@ -149,7 +150,7 @@ struct daemon {
 	/* File descriptors to listen on once we're activated. */
 	struct listen_fd *listen_fds;
 
-	/* Allow to define the default behavior of tot services calls*/
+	/* Allow to define the default behavior of tor services calls*/
 	bool use_v3_autotor;
 };
 
@@ -659,6 +660,10 @@ static struct io_plan *conn_init(struct io_conn *conn,
 		status_failed(STATUS_FAIL_INTERNAL_ERROR,
 			      "Can't connect to autotor address");
 		break;
+	case ADDR_INTERNAL_STATICTOR:
+		status_failed(STATUS_FAIL_INTERNAL_ERROR,
+			      "Can't connect to statictor address");
+		break;
 	case ADDR_INTERNAL_FORPROXY:
 		status_failed(STATUS_FAIL_INTERNAL_ERROR,
 			      "Can't connect to forproxy address");
@@ -695,6 +700,7 @@ static struct io_plan *conn_proxy_init(struct io_conn *conn,
 	case ADDR_INTERNAL_SOCKNAME:
 	case ADDR_INTERNAL_ALLPROTO:
 	case ADDR_INTERNAL_AUTOTOR:
+	case ADDR_INTERNAL_STATICTOR:
 		break;
 	}
 
@@ -738,6 +744,9 @@ static void try_connect_one_addr(struct connecting *connect)
 	case ADDR_INTERNAL_AUTOTOR:
 		status_failed(STATUS_FAIL_INTERNAL_ERROR,
 			      "Can't connect AUTOTOR");
+	case ADDR_INTERNAL_STATICTOR:
+		status_failed(STATUS_FAIL_INTERNAL_ERROR,
+			      "Can't connect STATICTOR");
 	case ADDR_INTERNAL_FORPROXY:
 		use_proxy = true;
 		break;
@@ -979,6 +988,23 @@ static void finalize_announcable(struct wireaddr **announcable)
 	}
 }
 
+
+static const struct wireaddr *
+find_local_address(const struct wireaddr_internal *bindings)
+{
+	for (size_t i = 0; i < tal_count(bindings); i++) {
+		if (bindings[i].itype != ADDR_INTERNAL_WIREADDR)
+			continue;
+		if (bindings[i].u.wireaddr.type != ADDR_TYPE_IPV4
+		    && bindings[i].u.wireaddr.type != ADDR_TYPE_IPV6)
+			continue;
+		return &bindings[i].u.wireaddr;
+	}
+	status_failed(STATUS_FAIL_INTERNAL_ERROR,
+		      "No local address found to tell Tor to connect to");
+}
+
+
 /*~ The user can specify three kinds of addresses: ones we bind to but don't
  * announce, ones we announce but don't bind to, and ones we bind to and
  * announce if they seem to be public addresses.
@@ -1000,6 +1026,8 @@ static struct wireaddr_internal *setup_listeners(const tal_t *ctx,
 	struct sockaddr_un addrun;
 	int fd;
 	struct wireaddr_internal *binding;
+	const char *blob;
+	struct secret random;
 
 	/* Start with empty arrays, for tal_arr_expand() */
 	binding = tal_arr(ctx, struct wireaddr_internal, 0);
@@ -1009,6 +1037,8 @@ static struct wireaddr_internal *setup_listeners(const tal_t *ctx,
 	 * addresses will be discarded then if we have multiple. */
 	for (size_t i = 0; i < tal_count(proposed_wireaddr); i++) {
 		struct wireaddr_internal wa = proposed_wireaddr[i];
+
+
 
 		/* We want announce-only addresses. */
 		if (proposed_listen_announce[i] & ADDR_LISTEN)
@@ -1025,7 +1055,6 @@ static struct wireaddr_internal *setup_listeners(const tal_t *ctx,
 	for (size_t i = 0; i < tal_count(proposed_wireaddr); i++) {
 		struct wireaddr_internal wa = proposed_wireaddr[i];
 		bool announce = (proposed_listen_announce[i] & ADDR_ANNOUNCE);
-
 		if (!(proposed_listen_announce[i] & ADDR_LISTEN))
 			continue;
 
@@ -1047,6 +1076,9 @@ static struct wireaddr_internal *setup_listeners(const tal_t *ctx,
 			add_binding(&binding, &wa);
 			continue;
 		case ADDR_INTERNAL_AUTOTOR:
+			/* We handle these after we have all bindings. */
+			continue;
+		case ADDR_INTERNAL_STATICTOR:
 			/* We handle these after we have all bindings. */
 			continue;
 		/* Special case meaning IPv6 and IPv4 */
@@ -1109,7 +1141,6 @@ static struct wireaddr_internal *setup_listeners(const tal_t *ctx,
 	for (size_t i = 0; i < tal_count(proposed_wireaddr); i++) {
 		if (!(proposed_listen_announce[i] & ADDR_LISTEN))
 			continue;
-
 		if (proposed_wireaddr[i].itype != ADDR_INTERNAL_AUTOTOR)
 			continue;
 		if (!(proposed_listen_announce[i] & ADDR_ANNOUNCE)) {
@@ -1127,9 +1158,44 @@ static struct wireaddr_internal *setup_listeners(const tal_t *ctx,
 						binding,
 						daemon->use_v3_autotor));
 	}
+	
+	/* Now we have bindings, set up any Tor static addresses: we will point
+	 * it at the first bound IPv4 or IPv6 address we have. */
+	for (size_t i = 0; i < tal_count(proposed_wireaddr); i++) {
+		if (!(proposed_listen_announce[i] & ADDR_LISTEN))
+			continue;
+		if (proposed_wireaddr[i].itype != ADDR_INTERNAL_STATICTOR)
+			continue;
+		blob = proposed_wireaddr[i].blob;
+		if (strstr(proposed_wireaddr[i].blob, "gen-default-toraddress")) {
+				if (sodium_mlock(&random, sizeof(random)) != 0)
+					status_failed(STATUS_FAIL_INTERNAL_ERROR,
+						"Could not lock the random key memory.");
+				randombytes_buf((void * const)&random, 32);
+				blob = tal_fmt(tmpctx, "%.32s%.32s", tal_hexstr(tmpctx, &daemon->id, 32), tal_hexstr(tmpctx, &random, 32));
+		}
 
+		if (!(proposed_listen_announce[i] & ADDR_ANNOUNCE)) {
+				tor_fixed_service(tmpctx,
+						&proposed_wireaddr[i].u.torservice,
+						tor_password,
+						blob,
+						find_local_address(binding),
+						0);
+				continue;
+		};
+		add_announcable(announcable,
+				tor_fixed_service(tmpctx,
+						&proposed_wireaddr[i].u.torservice,
+						tor_password,
+						blob,
+						find_local_address(binding),
+						0));
+	}
 	/* Sort and uniquify. */
 	finalize_announcable(announcable);
+
+	memset((void *)&random, 0, sizeof(random));
 
 	return binding;
 }
@@ -1158,7 +1224,8 @@ static struct io_plan *connect_init(struct io_conn *conn,
 		&proxyaddr, &daemon->use_proxy_always,
 		&daemon->dev_allow_localhost, &daemon->use_dns,
 		&tor_password,
-		&daemon->use_v3_autotor)) {
+		&daemon->use_v3_autotor
+		)) {
 		/* This is a helper which prints the type expected and the actual
 		 * message, then exits (it should never be called!). */
 		master_badmsg(WIRE_CONNECTCTL_INIT, msg);

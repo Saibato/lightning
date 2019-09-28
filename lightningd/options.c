@@ -11,6 +11,7 @@
 #include <ccan/tal/grab_file/grab_file.h>
 #include <ccan/tal/path/path.h>
 #include <ccan/tal/str/str.h>
+#include <common/base64.h>
 #include <common/configdir.h>
 #include <common/derive_basepoints.h>
 #include <common/features.h>
@@ -20,6 +21,7 @@
 #include <common/param.h>
 #include <common/version.h>
 #include <common/wireaddr.h>
+#include <connectd/tor_autoservice.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <inttypes.h>
@@ -646,6 +648,7 @@ static const struct config mainnet_config = {
 	/* Sets min_effective_htlc_capacity - at 1000$/BTC this is 10ct */
 	.min_capacity_sat = 10000,
 
+	/* Allow to define the default behavior of tor services calls*/
 	.use_v3_autotor = true,
 };
 
@@ -1074,6 +1077,7 @@ static void register_opts(struct lightningd *ld)
 
 	opt_register_arg("--proxy", opt_add_proxy_addr, NULL,
 			ld,"Set a socks v5 proxy IP address and port");
+
 	opt_register_arg("--tor-service-password", opt_set_talstr, NULL,
 			 &ld->tor_service_password,
 			 "Set a Tor hidden service password");

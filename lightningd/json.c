@@ -280,6 +280,12 @@ void json_add_address_internal(struct json_stream *response,
 		json_add_address(response, "service", &addr->u.torservice);
 		json_object_end(response);
 		return;
+	case ADDR_INTERNAL_STATICTOR:
+		json_object_start(response, fieldname);
+		json_add_string(response, "type", "Tor from blob generated static address");
+		json_add_address(response, "service", &addr->u.torservice);
+		json_object_end(response);
+		return;
 	case ADDR_INTERNAL_FORPROXY:
 		json_object_start(response, fieldname);
 		json_add_string(response, "type", "unresolved");

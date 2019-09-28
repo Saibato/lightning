@@ -17,6 +17,10 @@
 #include <unistd.h>
 #include <wire/wire.h>
 
+
+#include <ccan/err/err.h>
+
+
 bool wireaddr_eq(const struct wireaddr *a, const struct wireaddr *b)
 {
 	if (a->type != b->type)
@@ -82,6 +86,11 @@ void towire_wireaddr_internal(u8 **pptr, const struct wireaddr_internal *addr)
 	case ADDR_INTERNAL_AUTOTOR:
 		towire_wireaddr(pptr, &addr->u.torservice);
 		return;
+	case ADDR_INTERNAL_STATICTOR:
+		towire_u8_array(pptr, (const u8 *)addr->blob,
+				sizeof(addr->blob));
+		towire_wireaddr(pptr, &addr->u.torservice);
+		return;
 	case ADDR_INTERNAL_ALLPROTO:
 		towire_u16(pptr, addr->u.port);
 		return;
@@ -113,6 +122,11 @@ bool fromwire_wireaddr_internal(const u8 **cursor, size_t *max,
 		addr->u.port = fromwire_u16(cursor, max);
 		return *cursor != NULL;
 	case ADDR_INTERNAL_AUTOTOR:
+		return fromwire_wireaddr(cursor, max, &addr->u.torservice);
+	case ADDR_INTERNAL_STATICTOR:
+				fromwire_u8_array(cursor, max, (u8 *)addr->blob,
+				  sizeof(addr->blob));
+
 		return fromwire_wireaddr(cursor, max, &addr->u.torservice);
 	case ADDR_INTERNAL_WIREADDR:
 		return fromwire_wireaddr(cursor, max, &addr->u.wireaddr);
@@ -205,7 +219,10 @@ char *fmt_wireaddr_internal(const tal_t *ctx,
 	case ADDR_INTERNAL_AUTOTOR:
 		return tal_fmt(ctx, "autotor:%s",
 			       fmt_wireaddr(tmpctx, &a->u.torservice));
-	}
+	case ADDR_INTERNAL_STATICTOR:
+		return tal_fmt(ctx, "statictor:%s",
+			       fmt_wireaddr(tmpctx, &a->u.torservice));
+}
 	abort();
 }
 REGISTER_TYPE_TO_STRING(wireaddr_internal, fmt_wireaddr_internal);
@@ -458,10 +475,25 @@ bool parse_wireaddr_internal(const char *arg, struct wireaddr_internal *addr,
 				      err_msg);
 	}
 
+	/* 'statictor:' is a special prefix meaning talk to Tor to create
+	 * an onion address from a blob. */
+	if (strstarts(arg, "statictor:") &&
+		(strstr(arg, ":torblob:"))) {
+		addr->itype = ADDR_INTERNAL_STATICTOR;
+	    sprintf(&addr->blob[0], "%.64s", strstr(arg, ":torblob:") + strlen(":torblob:"));
+		char *temp = tal_fmt(tmpctx, "%s", arg + strlen ("statictor:"));
+		*(strstr(temp, ":torblob:")) = '\0';
+		return parse_wireaddr(temp,
+				      &addr->u.torservice, 9151,
+				      dns_ok ? NULL : &needed_dns,
+				      err_msg);
+	}
+
+
 	splitport = port;
 	if (!separate_address_and_port(tmpctx, arg, &ip, &splitport)) {
 		if (err_msg) {
-			*err_msg = "Error parsing hostname";
+			*err_msg = tal_fmt(tmpctx, "Error parsing hostname %s  %s", (char *)arg, ip);
 		}
 		return false;
 	}
@@ -541,6 +573,7 @@ struct addrinfo *wireaddr_internal_to_addrinfo(const tal_t *ctx,
 		return ai;
 	case ADDR_INTERNAL_ALLPROTO:
 	case ADDR_INTERNAL_AUTOTOR:
+	case ADDR_INTERNAL_STATICTOR:
 	case ADDR_INTERNAL_FORPROXY:
 		break;
 	case ADDR_INTERNAL_WIREADDR:
@@ -591,6 +624,7 @@ bool all_tor_addresses(const struct wireaddr_internal *wireaddr)
 		case ADDR_INTERNAL_ALLPROTO:
 			return false;
 		case ADDR_INTERNAL_AUTOTOR:
+		case ADDR_INTERNAL_STATICTOR:
 			continue;
 		case ADDR_INTERNAL_WIREADDR:
 			switch (wireaddr[i].u.wireaddr.type) {
