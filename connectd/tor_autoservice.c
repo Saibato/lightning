@@ -26,7 +26,6 @@
 static void *buf_resize(struct membuf *mb, void *buf, size_t len)
 {
 	tal_resize(&buf, len);
-
 	return buf;
 }
 

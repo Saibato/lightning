@@ -123,9 +123,8 @@ bool fromwire_wireaddr_internal(const u8 **cursor, size_t *max,
 	case ADDR_INTERNAL_AUTOTOR:
 		return fromwire_wireaddr(cursor, max, &addr->u.torservice);
 	case ADDR_INTERNAL_STATICTOR:
-				fromwire_u8_array(cursor, max, (u8 *)addr->blob,
-				  sizeof(addr->blob));
-
+		fromwire_u8_array(cursor, max, (u8 *)addr->blob,
+				 sizeof(addr->blob));
 		return fromwire_wireaddr(cursor, max, &addr->u.torservice);
 	case ADDR_INTERNAL_WIREADDR:
 		return fromwire_wireaddr(cursor, max, &addr->u.wireaddr);
@@ -445,7 +444,7 @@ bool parse_wireaddr_internal(const char *arg, struct wireaddr_internal *addr,
 			     const char **err_msg)
 {
 	u16 splitport;
-	char *ip;
+	char *ip = NULL;
 	bool needed_dns = false;
 
 	/* Addresses starting with '/' are local socket paths */
@@ -479,16 +478,27 @@ bool parse_wireaddr_internal(const char *arg, struct wireaddr_internal *addr,
 	if (strstarts(arg, "statictor:") &&
 		(strstr(arg, ":torblob:"))) {
 		addr->itype = ADDR_INTERNAL_STATICTOR;
-		char *temp = tal_fmt(tmpctx, "%.64s", strstr(arg, ":torblob:") + strlen(":torblob:"));
+		memset(&(addr->blob[0]), 0, sizeof(addr->blob));
+		char *temp = tal_fmt(tmpctx , "%.64s", strstr(arg, ":torblob:") + strlen(":torblob:"));
+		strncpy(&(addr->blob[0]), temp, TOR_V3_BLOBLEN);
 		if (strlen(temp) == 0) {
  			if (err_msg)
 			*err_msg = "Blob too short";
 			return false;
 		}
-		strncpy(&(addr->blob[0]), temp, TOR_V3_BLOBLEN);
 		temp = tal_fmt(tmpctx, "%s", arg + strlen ("statictor:"));
 		*(strstr(temp, ":torblob:")) = '\0';
 		return parse_wireaddr(temp,
+				      &addr->u.torservice, 9151,
+				      dns_ok ? NULL : &needed_dns,
+				      err_msg);
+	}
+	/* when called just with the service address genarate the unique onion */
+	if (strstarts(arg, "statictor:")) {
+		addr->itype = ADDR_INTERNAL_STATICTOR;
+		memset(&(addr->blob[0]), 0, sizeof(addr->blob));
+		strncpy(&(addr->blob[0]), tal_fmt(tmpctx, TOR_UNIQUE_STRING), strlen(TOR_UNIQUE_STRING));
+		return parse_wireaddr( arg + strlen ("statictor:"),
 				      &addr->u.torservice, 9151,
 				      dns_ok ? NULL : &needed_dns,
 				      err_msg);
