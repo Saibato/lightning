@@ -1028,6 +1028,7 @@ static struct wireaddr_internal *setup_listeners(const tal_t *ctx,
 	struct wireaddr_internal *binding;
 	const char *blob;
 	struct secret random;
+	struct pubkey pb;
 
 	/* Start with empty arrays, for tal_arr_expand() */
 	binding = tal_arr(ctx, struct wireaddr_internal, 0);
@@ -1158,7 +1159,7 @@ static struct wireaddr_internal *setup_listeners(const tal_t *ctx,
 						binding,
 						daemon->use_v3_autotor));
 	}
-	
+
 	/* Now we have bindings, set up any Tor static addresses: we will point
 	 * it at the first bound IPv4 or IPv6 address we have. */
 	for (size_t i = 0; i < tal_count(proposed_wireaddr); i++) {
@@ -1167,13 +1168,21 @@ static struct wireaddr_internal *setup_listeners(const tal_t *ctx,
 		if (proposed_wireaddr[i].itype != ADDR_INTERNAL_STATICTOR)
 			continue;
 		blob = proposed_wireaddr[i].blob;
-		if (strstr(proposed_wireaddr[i].blob, "gen-default-toraddress")) {
+
+		if (pubkey_from_node_id(&pb, &daemon->id)) {
+			if (strstr(proposed_wireaddr[i].blob, "gen-default-toraddress")) {
 				if (sodium_mlock(&random, sizeof(random)) != 0)
-					status_failed(STATUS_FAIL_INTERNAL_ERROR,
-						"Could not lock the random key memory.");
+						status_failed(STATUS_FAIL_INTERNAL_ERROR,
+									"Could not lock the random scalar key memory.");
 				randombytes_buf((void * const)&random, 32);
-				blob = tal_fmt(tmpctx, "%.32s%.32s", tal_hexstr(tmpctx, &daemon->id, 32), tal_hexstr(tmpctx, &random, 32));
-		}
+				/* generate static tor node address, take first 32 bytes from secret of node_id plus 32 random bytes from sodiom */
+				struct sha256 sha;
+				sha256(&sha, hsm_do_ecdh(tmpctx, &pb), 32);
+				/* even if it's a partly secret, tor shall see only the sha */
+				blob = tal_fmt(tmpctx, "%.32s%.32s", tal_hexstr(tmpctx, &sha, 32), tal_hexstr(tmpctx, &random, 32));
+			}
+		} else status_failed(STATUS_FAIL_INTERNAL_ERROR,
+							"Could not get the secret for our node id from hsm");
 
 		if (!(proposed_listen_announce[i] & ADDR_ANNOUNCE)) {
 				tor_fixed_service(tmpctx,
@@ -1196,6 +1205,8 @@ static struct wireaddr_internal *setup_listeners(const tal_t *ctx,
 	finalize_announcable(announcable);
 
 	memset((void *)&random, 0, sizeof(random));
+	memset((void *)&pb, 0, sizeof(pb));
+
 
 	return binding;
 }

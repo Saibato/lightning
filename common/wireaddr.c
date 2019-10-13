@@ -1,6 +1,7 @@
 #include <arpa/inet.h>
 #include <assert.h>
 #include <ccan/build_assert/build_assert.h>
+#include <ccan/err/err.h>
 #include <ccan/io/io.h>
 #include <ccan/mem/mem.h>
 #include <ccan/str/hex/hex.h>
@@ -17,8 +18,6 @@
 #include <unistd.h>
 #include <wire/wire.h>
 
-
-#include <ccan/err/err.h>
 
 
 bool wireaddr_eq(const struct wireaddr *a, const struct wireaddr *b)
@@ -480,15 +479,20 @@ bool parse_wireaddr_internal(const char *arg, struct wireaddr_internal *addr,
 	if (strstarts(arg, "statictor:") &&
 		(strstr(arg, ":torblob:"))) {
 		addr->itype = ADDR_INTERNAL_STATICTOR;
-	    sprintf(&addr->blob[0], "%.64s", strstr(arg, ":torblob:") + strlen(":torblob:"));
-		char *temp = tal_fmt(tmpctx, "%s", arg + strlen ("statictor:"));
+		char *temp = tal_fmt(tmpctx, "%.64s", strstr(arg, ":torblob:") + strlen(":torblob:"));
+		if (strlen(temp) == 0) {
+ 			if (err_msg)
+			*err_msg = "Blob too short";
+			return false;
+		}
+		strncpy(&(addr->blob[0]), temp, TOR_V3_BLOBLEN);
+		temp = tal_fmt(tmpctx, "%s", arg + strlen ("statictor:"));
 		*(strstr(temp, ":torblob:")) = '\0';
 		return parse_wireaddr(temp,
 				      &addr->u.torservice, 9151,
 				      dns_ok ? NULL : &needed_dns,
 				      err_msg);
 	}
-
 
 	splitport = port;
 	if (!separate_address_and_port(tmpctx, arg, &ip, &splitport)) {
