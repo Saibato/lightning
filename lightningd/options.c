@@ -168,6 +168,10 @@ static char *opt_add_announce_addr(const char *arg, struct lightningd *ld)
 	if (strstarts(arg, "autotor:"))
 		return opt_add_addr(arg, ld);
 
+	/* Check for statictor and reroute the call to --addr  */
+	if (strstarts(arg, "statictor:"))
+		return opt_add_addr(arg, ld);
+
 	err = opt_add_addr_withtype(arg, ld, ADDR_ANNOUNCE, false);
 	if (err)
 		return err;

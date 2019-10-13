@@ -1207,7 +1207,6 @@ static struct wireaddr_internal *setup_listeners(const tal_t *ctx,
 	memset((void *)&random, 0, sizeof(random));
 	memset((void *)&pb, 0, sizeof(pb));
 
-
 	return binding;
 }
 
