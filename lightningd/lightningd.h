@@ -226,7 +226,7 @@ struct lightningd {
 #endif /* DEVELOPER */
 
 	/* tor support */
-	struct wireaddr *proxyaddr;;
+	struct wireaddr *proxyaddr;
 	bool use_proxy_always;
 	char *tor_service_password;
 	bool pure_tor_setup;

@@ -44,6 +44,7 @@ struct sockaddr_un;
 #define	TOR_V3_ADDRLEN 35
 #define	LARGEST_ADDRLEN TOR_V3_ADDRLEN
 #define	TOR_V3_BLOBLEN 64
+#define	TOR_UNIQUE_STRING "gen-default-toraddress"
 
 enum wire_addr_type {
 	ADDR_TYPE_IPV4 = 1,
@@ -117,7 +118,7 @@ enum wireaddr_internal_type {
 /* For internal use, where we can also supply a local socket, wildcard. */
 struct wireaddr_internal {
 	enum wireaddr_internal_type itype;
-	char blob[TOR_V3_BLOBLEN +1];
+	char blob[TOR_V3_BLOBLEN + 1];
 	union {
 		/* ADDR_INTERNAL_WIREADDR */
 		struct wireaddr wireaddr;

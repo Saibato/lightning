@@ -1026,7 +1026,7 @@ static struct wireaddr_internal *setup_listeners(const tal_t *ctx,
 	struct sockaddr_un addrun;
 	int fd;
 	struct wireaddr_internal *binding;
-	const char *blob;
+	const char *blob = NULL;
 	struct secret random;
 	struct pubkey pb;
 
@@ -1170,7 +1170,7 @@ static struct wireaddr_internal *setup_listeners(const tal_t *ctx,
 		blob = proposed_wireaddr[i].blob;
 
 		if (pubkey_from_node_id(&pb, &daemon->id)) {
-			if (strstr(proposed_wireaddr[i].blob, "gen-default-toraddress")) {
+			if (strstr(proposed_wireaddr[i].blob, TOR_UNIQUE_STRING)) {
 				if (sodium_mlock(&random, sizeof(random)) != 0)
 						status_failed(STATUS_FAIL_INTERNAL_ERROR,
 									"Could not lock the random scalar key memory.");

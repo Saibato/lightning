@@ -21,7 +21,6 @@
 #include <common/param.h>
 #include <common/version.h>
 #include <common/wireaddr.h>
-#include <connectd/tor_autoservice.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <inttypes.h>
@@ -1081,7 +1080,6 @@ static void register_opts(struct lightningd *ld)
 
 	opt_register_arg("--proxy", opt_add_proxy_addr, NULL,
 			ld,"Set a socks v5 proxy IP address and port");
-
 	opt_register_arg("--tor-service-password", opt_set_talstr, NULL,
 			 &ld->tor_service_password,
 			 "Set a Tor hidden service password");
