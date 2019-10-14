@@ -1587,3 +1587,34 @@ def test_gossip_ratelimit(node_factory):
                    check=True, timeout=TIMEOUT)
 
     wait_for(lambda: [c['fee_per_millionth'] for c in l3.rpc.listchannels()['channels']] == [1006])
+
+
+@unittest.skipIf(False, "needs a running Tor service instance at port 9151 or 9051")
+def test_statictor_onions(node_factory):
+    """ First basic tests ;-)
+        Assume that tor is configured and just test
+        if we see the right onion address for our blob
+        you can test with your local branch by comment the
+        @unittest.skipIf(True, "needs a ..... line or set True to False for the skipIf
+        with PYTHONPATH=contrib/pylightning  py.test  -v tests/test_gossip.py -k test_statictor_onions
+    """
+    try:
+        l1 = node_factory.get_node(may_fail=True, options={'addr': ['127.0.0.1:1234',
+                                                           'statictor:127.0.0.1:9051']})
+        l2 = node_factory.get_node(may_fail=True, options={'addr': ['127.0.0.1:12345',
+                                                           'statictor:127.0.0.1:9051:torblob:11234567890123456789012345678901']})
+    except Exception:
+        try:
+            l1 = node_factory.get_node(may_fail=True, options={'addr': ['127.0.0.1:1234',
+                                                               'statictor:127.0.0.1:9151']})
+            l2 = node_factory.get_node(may_fail=True, options={'addr': ['127.0.0.1:12345',
+                                                               'statictor:127.0.0.1:9151:torblob:11234567890123456789012345678901']})
+        except Exception:
+            """ probably we have no torconnection, for now just let it be PASSED """
+            return
+        assert l1.daemon.is_in_log('9735,127.0.0.1:')
+        assert l2.daemon.is_in_log('x2y4zvh4fn5q3eouuh7nxnc7zeawrqoutljrup2xjtiyxgx3emgkemad.onion:9735,127.0.0.1:12345')
+
+        return
+    assert l1.daemon.is_in_log('9735,127.0.0.1:')
+    assert l2.daemon.is_in_log('x2y4zvh4fn5q3eouuh7nxnc7zeawrqoutljrup2xjtiyxgx3emgkemad.onion:9735,127.0.0.1:12345')
