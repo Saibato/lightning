@@ -486,7 +486,7 @@ bool parse_wireaddr_internal(const char *arg, struct wireaddr_internal *addr,
 			*err_msg = "Blob too short";
 			return false;
 		}
-		temp = tal_fmt(tmpctx, "%s", arg + strlen ("statictor:"));
+		temp = tal_fmt(tmpctx, "%s", arg + strlen("statictor:"));
 		*(strstr(temp, ":torblob:")) = '\0';
 		return parse_wireaddr(temp,
 				      &addr->u.torservice, 9151,
@@ -498,7 +498,7 @@ bool parse_wireaddr_internal(const char *arg, struct wireaddr_internal *addr,
 		addr->itype = ADDR_INTERNAL_STATICTOR;
 		memset(&(addr->blob[0]), 0, sizeof(addr->blob));
 		strncpy(&(addr->blob[0]), tal_fmt(tmpctx, TOR_UNIQUE_STRING), strlen(TOR_UNIQUE_STRING));
-		return parse_wireaddr( arg + strlen ("statictor:"),
+		return parse_wireaddr( arg + strlen("statictor:"),
 				      &addr->u.torservice, 9151,
 				      dns_ok ? NULL : &needed_dns,
 				      err_msg);

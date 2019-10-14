@@ -124,7 +124,8 @@ struct wireaddr_internal {
 		struct wireaddr wireaddr;
 		/* ADDR_INTERNAL_ALLPROTO */
 		u16 port;
-		/* ADDR_INTERNAL_AUTOTOR/STATICTOR service address */
+		/* ADDR_INTERNAL_AUTOTOR
+		 * ADDR_INTERNAL_STATICTOR */
 		struct wireaddr torservice;
 		/* ADDR_INTERNAL_FORPROXY */
 		struct unresolved {
