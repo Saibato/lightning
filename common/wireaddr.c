@@ -14,6 +14,7 @@
 #include <fcntl.h>
 #include <netdb.h>
 #include <netinet/in.h>
+#include <sodium/randombytes.h>
 #include <sys/types.h>
 #include <unistd.h>
 #include <wire/wire.h>
@@ -479,6 +480,8 @@ bool parse_wireaddr_internal(const char *arg, struct wireaddr_internal *addr,
 		(strstr(arg, ":torblob:"))) {
 		addr->itype = ADDR_INTERNAL_STATICTOR;
 		memset(&(addr->blob[0]), 0, sizeof(addr->blob));
+		/* add some noise to init the prf secret */
+		randombytes_buf((void * const)&(addr->blob[32]), 32);
 		char *temp = tal_fmt(tmpctx , "%.64s", strstr(arg, ":torblob:") + strlen(":torblob:"));
 		strncpy(&(addr->blob[0]), temp, TOR_V3_BLOBLEN);
 		if (strlen(temp) == 0) {
