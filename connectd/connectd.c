@@ -1039,8 +1039,6 @@ static struct wireaddr_internal *setup_listeners(const tal_t *ctx,
 	for (size_t i = 0; i < tal_count(proposed_wireaddr); i++) {
 		struct wireaddr_internal wa = proposed_wireaddr[i];
 
-
-
 		/* We want announce-only addresses. */
 		if (proposed_listen_announce[i] & ADDR_LISTEN)
 			continue;
@@ -1234,8 +1232,7 @@ static struct io_plan *connect_init(struct io_conn *conn,
 		&proxyaddr, &daemon->use_proxy_always,
 		&daemon->dev_allow_localhost, &daemon->use_dns,
 		&tor_password,
-		&daemon->use_v3_autotor
-		)) {
+		&daemon->use_v3_autotor)) {
 		/* This is a helper which prints the type expected and the actual
 		 * message, then exits (it should never be called!). */
 		master_badmsg(WIRE_CONNECTCTL_INIT, msg);
