@@ -244,7 +244,7 @@ precisely control where to bind and what to announce with the
 *bind-addr* and *announce-addr* options. These will **disable** the
 *autolisten* logic, so you must specifiy exactly what you want!
 
- **addr**=*\[IPADDRESS\[:PORT\]\]|autotor:TORIPADDRESS\[:TORPORT\]|statictor:TORIPADDRESS\[:TORPORT\][:torblob:[blob]]*
+ **addr**=*\[IPADDRESS\[:PORT\]\]|autotor:TORIPADDRESS\[:TORPORT\]|statictor:TORIPADDRESS\[:TORPORT\]\[:torblob:\[blob\]\]*
 
 Set an IP address (v4 or v6) or automatic Tor address to listen on and
 (maybe) announce as our node address.

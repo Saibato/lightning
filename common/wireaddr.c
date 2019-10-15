@@ -500,7 +500,7 @@ bool parse_wireaddr_internal(const char *arg, struct wireaddr_internal *addr,
 	if (strstarts(arg, "statictor:")) {
 		addr->itype = ADDR_INTERNAL_STATICTOR;
 		memset(&(addr->blob[0]), 0, sizeof(addr->blob));
-		strncpy(&(addr->blob[0]), tal_fmt(tmpctx, TOR_UNIQUE_STRING), strlen(TOR_UNIQUE_STRING));
+		strncpy(&(addr->blob[0]), tal_fmt(tmpctx, STATIC_TOR_MAGIC_STRING), strlen(STATIC_TOR_MAGIC_STRING));
 		return parse_wireaddr( arg + strlen("statictor:"),
 				      &addr->u.torservice, 9151,
 				      dns_ok ? NULL : &needed_dns,

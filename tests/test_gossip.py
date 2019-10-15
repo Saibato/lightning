@@ -1589,7 +1589,7 @@ def test_gossip_ratelimit(node_factory):
     wait_for(lambda: [c['fee_per_millionth'] for c in l3.rpc.listchannels()['channels']] == [1006])
 
 
-@unittest.skipIf(False, "needs a running Tor service instance at port 9151 or 9051")
+@unittest.skipIf(True, "needs a running Tor service instance at port 9151 or 9051")
 def test_statictor_onions(node_factory):
     """ First basic tests ;-)
         Assume that tor is configured and just test
