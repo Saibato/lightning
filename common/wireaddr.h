@@ -44,7 +44,7 @@ struct sockaddr_un;
 #define	TOR_V3_ADDRLEN 35
 #define	LARGEST_ADDRLEN TOR_V3_ADDRLEN
 #define	TOR_V3_BLOBLEN 64
-#define	TOR_UNIQUE_STRING "gen-default-toraddress"
+#define	STATIC_TOR_MAGIC_STRING "gen-default-toraddress"
 
 enum wire_addr_type {
 	ADDR_TYPE_IPV4 = 1,

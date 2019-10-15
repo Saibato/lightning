@@ -1168,10 +1168,10 @@ static struct wireaddr_internal *setup_listeners(const tal_t *ctx,
 		blob = proposed_wireaddr[i].blob;
 
 		if (pubkey_from_node_id(&pb, &daemon->id)) {
-			if (strstr(proposed_wireaddr[i].blob, TOR_UNIQUE_STRING)) {
+			if (strstr(proposed_wireaddr[i].blob, STATIC_TOR_MAGIC_STRING)) {
 				if (sodium_mlock(&random, sizeof(random)) != 0)
 						status_failed(STATUS_FAIL_INTERNAL_ERROR,
-									"Could not lock the random scalar key memory.");
+									"Could not lock the random prf key memory.");
 				randombytes_buf((void * const)&random, 32);
 				/* generate static tor node address, take first 32 bytes from secret of node_id plus 32 random bytes from sodiom */
 				struct sha256 sha;
