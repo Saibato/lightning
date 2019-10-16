@@ -476,9 +476,12 @@ bool parse_wireaddr_internal(const char *arg, struct wireaddr_internal *addr,
 				      dns_ok ? NULL : &needed_dns,
 				      err_msg);
 	}
+
+	/* 'statictor:' is a special prefix meaning talk to Tor to create
+	 * an onion address. */
 	if (strstarts(arg, "statictor:")) {
 		addr->itype = ADDR_INTERNAL_STATICTOR;
-		addr->u.torservice.port = 123;
+		addr->u.torservice.port = DEFAULT_PORT;
 	}
 	if (strstarts(arg, "statictor:") &&
 		(strstr(arg, ":torport:"))) {
