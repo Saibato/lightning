@@ -1144,7 +1144,7 @@ static struct wireaddr_internal *setup_listeners(const tal_t *ctx,
 			continue;
 		if (!(proposed_listen_announce[i] & ADDR_ANNOUNCE)) {
 				tor_autoservice(tmpctx,
-						&proposed_wireaddr[i].u.torservice,
+						&proposed_wireaddr[i].u.torservice.torservice,
 						tor_password,
 						binding,
 						daemon->use_v3_autotor);
@@ -1152,7 +1152,7 @@ static struct wireaddr_internal *setup_listeners(const tal_t *ctx,
 		};
 		add_announcable(announcable,
 				tor_autoservice(tmpctx,
-						&proposed_wireaddr[i].u.torservice,
+						&proposed_wireaddr[i].u.torservice.torservice,
 						tor_password,
 						binding,
 						daemon->use_v3_autotor));
@@ -1165,10 +1165,10 @@ static struct wireaddr_internal *setup_listeners(const tal_t *ctx,
 			continue;
 		if (proposed_wireaddr[i].itype != ADDR_INTERNAL_STATICTOR)
 			continue;
-		blob = proposed_wireaddr[i].blob;
+		blob = proposed_wireaddr[i].u.torservice.blob;
 
 		if (pubkey_from_node_id(&pb, &daemon->id)) {
-			if (strstr(proposed_wireaddr[i].blob, STATIC_TOR_MAGIC_STRING)) {
+			if (strstr(proposed_wireaddr[i].u.torservice.blob, STATIC_TOR_MAGIC_STRING)) {
 				if (sodium_mlock(&random, sizeof(random)) != 0)
 						status_failed(STATUS_FAIL_INTERNAL_ERROR,
 									"Could not lock the random prf key memory.");
@@ -1184,7 +1184,7 @@ static struct wireaddr_internal *setup_listeners(const tal_t *ctx,
 
 		if (!(proposed_listen_announce[i] & ADDR_ANNOUNCE)) {
 				tor_fixed_service(tmpctx,
-						&proposed_wireaddr[i].u.torservice,
+						&proposed_wireaddr[i].u.torservice.torservice,
 						tor_password,
 						blob,
 						find_local_address(binding),
@@ -1193,7 +1193,7 @@ static struct wireaddr_internal *setup_listeners(const tal_t *ctx,
 		};
 		add_announcable(announcable,
 				tor_fixed_service(tmpctx,
-						&proposed_wireaddr[i].u.torservice,
+						&proposed_wireaddr[i].u.torservice.torservice,
 						tor_password,
 						blob,
 						find_local_address(binding),

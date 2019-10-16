@@ -84,12 +84,12 @@ void towire_wireaddr_internal(u8 **pptr, const struct wireaddr_internal *addr)
 				sizeof(addr->u.sockname));
 		return;
 	case ADDR_INTERNAL_AUTOTOR:
-		towire_wireaddr(pptr, &addr->u.torservice);
+		towire_wireaddr(pptr, &addr->u.torservice.torservice);
 		return;
 	case ADDR_INTERNAL_STATICTOR:
-		towire_u8_array(pptr, (const u8 *)addr->blob,
-				sizeof(addr->blob));
-		towire_wireaddr(pptr, &addr->u.torservice);
+		towire_wireaddr(pptr, &addr->u.torservice.torservice);
+		towire_u8_array(pptr, (const u8 *)addr->u.torservice.blob,
+				sizeof(addr->u.torservice.blob));
 		return;
 	case ADDR_INTERNAL_ALLPROTO:
 		towire_u16(pptr, addr->u.port);
@@ -122,11 +122,12 @@ bool fromwire_wireaddr_internal(const u8 **cursor, size_t *max,
 		addr->u.port = fromwire_u16(cursor, max);
 		return *cursor != NULL;
 	case ADDR_INTERNAL_AUTOTOR:
-		return fromwire_wireaddr(cursor, max, &addr->u.torservice);
+		return fromwire_wireaddr(cursor, max, &addr->u.torservice.torservice);
 	case ADDR_INTERNAL_STATICTOR:
-		fromwire_u8_array(cursor, max, (u8 *)addr->blob,
-				 sizeof(addr->blob));
-		return fromwire_wireaddr(cursor, max, &addr->u.torservice);
+		fromwire_wireaddr(cursor, max, &addr->u.torservice.torservice);
+		fromwire_u8_array(cursor, max, (u8 *)addr->u.torservice.blob,
+				 sizeof(addr->u.torservice.blob));
+		return *cursor != NULL;
 	case ADDR_INTERNAL_WIREADDR:
 		return fromwire_wireaddr(cursor, max, &addr->u.wireaddr);
 	case ADDR_INTERNAL_FORPROXY:
@@ -217,10 +218,10 @@ char *fmt_wireaddr_internal(const tal_t *ctx,
 			       a->u.unresolved.name, a->u.unresolved.port);
 	case ADDR_INTERNAL_AUTOTOR:
 		return tal_fmt(ctx, "autotor:%s",
-			       fmt_wireaddr(tmpctx, &a->u.torservice));
+			       fmt_wireaddr(tmpctx, &a->u.torservice.torservice));
 	case ADDR_INTERNAL_STATICTOR:
 		return tal_fmt(ctx, "statictor:%s",
-			       fmt_wireaddr(tmpctx, &a->u.torservice));
+			       fmt_wireaddr(tmpctx, &a->u.torservice.torservice));
 }
 	abort();
 }
@@ -469,7 +470,7 @@ bool parse_wireaddr_internal(const char *arg, struct wireaddr_internal *addr,
 	if (strstarts(arg, "autotor:")) {
 		addr->itype = ADDR_INTERNAL_AUTOTOR;
 		return parse_wireaddr(arg + strlen("autotor:"),
-				      &addr->u.torservice, 9051,
+				      &addr->u.torservice.torservice, 9051,
 				      dns_ok ? NULL : &needed_dns,
 				      err_msg);
 	}
@@ -479,11 +480,11 @@ bool parse_wireaddr_internal(const char *arg, struct wireaddr_internal *addr,
 	if (strstarts(arg, "statictor:") &&
 		(strstr(arg, ":torblob:"))) {
 		addr->itype = ADDR_INTERNAL_STATICTOR;
-		memset(&(addr->blob[0]), 0, sizeof(addr->blob));
+		memset(&(addr->u.torservice.blob[0]), 0, sizeof(addr->u.torservice.blob));
 		/* add some noise to init the prf secret */
-		randombytes_buf((void * const)&(addr->blob[32]), 32);
+		randombytes_buf((void * const)&(addr->u.torservice.blob[32]), 32);
 		char *temp = tal_fmt(tmpctx , "%.64s", strstr(arg, ":torblob:") + strlen(":torblob:"));
-		strncpy(&(addr->blob[0]), temp, TOR_V3_BLOBLEN);
+		strncpy(&(addr->u.torservice.blob[0]), temp, TOR_V3_BLOBLEN);
 		if (strlen(temp) == 0) {
  			if (err_msg)
 			*err_msg = "Blob too short";
@@ -492,17 +493,17 @@ bool parse_wireaddr_internal(const char *arg, struct wireaddr_internal *addr,
 		temp = tal_fmt(tmpctx, "%s", arg + strlen("statictor:"));
 		*(strstr(temp, ":torblob:")) = '\0';
 		return parse_wireaddr(temp,
-				      &addr->u.torservice, 9151,
+				      &addr->u.torservice.torservice, 9151,
 				      dns_ok ? NULL : &needed_dns,
 				      err_msg);
 	}
 	/* when called just with the service address genarate the unique onion */
 	if (strstarts(arg, "statictor:")) {
 		addr->itype = ADDR_INTERNAL_STATICTOR;
-		memset(&(addr->blob[0]), 0, sizeof(addr->blob));
-		strncpy(&(addr->blob[0]), tal_fmt(tmpctx, STATIC_TOR_MAGIC_STRING), strlen(STATIC_TOR_MAGIC_STRING));
+		memset(&(addr->u.torservice.blob[0]), 0, sizeof(addr->u.torservice.blob));
+		strncpy(&(addr->u.torservice.blob[0]), tal_fmt(tmpctx, STATIC_TOR_MAGIC_STRING), strlen(STATIC_TOR_MAGIC_STRING));
 		return parse_wireaddr( arg + strlen("statictor:"),
-				      &addr->u.torservice, 9151,
+				      &addr->u.torservice.torservice, 9151,
 				      dns_ok ? NULL : &needed_dns,
 				      err_msg);
 	}

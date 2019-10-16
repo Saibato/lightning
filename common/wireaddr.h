@@ -118,7 +118,6 @@ enum wireaddr_internal_type {
 /* For internal use, where we can also supply a local socket, wildcard. */
 struct wireaddr_internal {
 	enum wireaddr_internal_type itype;
-	char blob[TOR_V3_BLOBLEN + 1];
 	union {
 		/* ADDR_INTERNAL_WIREADDR */
 		struct wireaddr wireaddr;
@@ -126,7 +125,11 @@ struct wireaddr_internal {
 		u16 port;
 		/* ADDR_INTERNAL_AUTOTOR
 		 * ADDR_INTERNAL_STATICTOR */
-		struct wireaddr torservice;
+		struct torservice {
+			struct wireaddr torservice;
+			u16 port;
+			char blob[TOR_V3_BLOBLEN + 1];
+		} torservice;
 		/* ADDR_INTERNAL_FORPROXY */
 		struct unresolved {
 			char name[256];
