@@ -90,6 +90,7 @@ void towire_wireaddr_internal(u8 **pptr, const struct wireaddr_internal *addr)
 		towire_wireaddr(pptr, &addr->u.torservice.torservice);
 		towire_u8_array(pptr, (const u8 *)addr->u.torservice.blob,
 				sizeof(addr->u.torservice.blob));
+		towire_u16(pptr, addr->u.torservice.port);
 		return;
 	case ADDR_INTERNAL_ALLPROTO:
 		towire_u16(pptr, addr->u.port);
@@ -127,6 +128,7 @@ bool fromwire_wireaddr_internal(const u8 **cursor, size_t *max,
 		fromwire_wireaddr(cursor, max, &addr->u.torservice.torservice);
 		fromwire_u8_array(cursor, max, (u8 *)addr->u.torservice.blob,
 				 sizeof(addr->u.torservice.blob));
+		addr->u.torservice.port = fromwire_u16(cursor, max);
 		return *cursor != NULL;
 	case ADDR_INTERNAL_WIREADDR:
 		return fromwire_wireaddr(cursor, max, &addr->u.wireaddr);
@@ -474,9 +476,22 @@ bool parse_wireaddr_internal(const char *arg, struct wireaddr_internal *addr,
 				      dns_ok ? NULL : &needed_dns,
 				      err_msg);
 	}
-
-	/* 'statictor:' is a special prefix meaning talk to Tor to create
-	 * an onion address from a blob. */
+	if (strstarts(arg, "statictor:")) {
+		addr->itype = ADDR_INTERNAL_STATICTOR;
+		addr->u.torservice.port = 123;
+	}
+	if (strstarts(arg, "statictor:") &&
+		(strstr(arg, ":torport:"))) {
+		char *temp = tal_fmt(tmpctx , "%.256s", strstr(arg, ":torport:") + strlen(":torport:"));
+		if(strstr(temp, ":torblob:"))
+			*(strstr(temp, ":torblob:")) = '\0';
+		addr->u.torservice.port = atoi(temp);
+		if (strlen(temp) == 0) {
+			if (err_msg)
+			*err_msg = "Port string too short";
+			return false;
+		}
+	}
 	if (strstarts(arg, "statictor:") &&
 		(strstr(arg, ":torblob:"))) {
 		addr->itype = ADDR_INTERNAL_STATICTOR;
@@ -491,19 +506,24 @@ bool parse_wireaddr_internal(const char *arg, struct wireaddr_internal *addr,
 			return false;
 		}
 		temp = tal_fmt(tmpctx, "%s", arg + strlen("statictor:"));
-		*(strstr(temp, ":torblob:")) = '\0';
+		if(strstr(arg, ":torblob:"))
+				*(strstr(temp, ":torblob:")) = '\0';
 		return parse_wireaddr(temp,
-				      &addr->u.torservice.torservice, 9151,
+				      &addr->u.torservice.torservice, 9051,
 				      dns_ok ? NULL : &needed_dns,
 				      err_msg);
 	}
-	/* when called just with the service address genarate the unique onion */
+
+	/* when statictor called just with the service address and or port generate the unique onion */
 	if (strstarts(arg, "statictor:")) {
 		addr->itype = ADDR_INTERNAL_STATICTOR;
 		memset(&(addr->u.torservice.blob[0]), 0, sizeof(addr->u.torservice.blob));
 		strncpy(&(addr->u.torservice.blob[0]), tal_fmt(tmpctx, STATIC_TOR_MAGIC_STRING), strlen(STATIC_TOR_MAGIC_STRING));
-		return parse_wireaddr( arg + strlen("statictor:"),
-				      &addr->u.torservice.torservice, 9151,
+		char *temp = tal_fmt(tmpctx , "%s", arg + strlen("statictor:"));
+		if(strstr(arg, ":torport:"))
+				*(strstr(temp, ":torport:")) = '\0';
+		return parse_wireaddr(temp,
+				      &addr->u.torservice.torservice, 9051,
 				      dns_ok ? NULL : &needed_dns,
 				      err_msg);
 	}
