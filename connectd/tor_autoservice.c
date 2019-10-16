@@ -182,15 +182,15 @@ static struct wireaddr *make_fixed_onion(const tal_t *ctx,
 
 		name = tal_fmt(tmpctx, "%s.onion", line);
 		onion = tal(ctx, struct wireaddr);
-		if (!parse_wireaddr(name, onion, DEFAULT_PORT, false, NULL))
+		if (!parse_wireaddr(name, onion, local->port, false, NULL))
 			status_failed(STATUS_FAIL_INTERNAL_ERROR,
 				      "Tor gave bad onion name '%s'", name);
 		#ifdef SUPERVERBOSE
 		 status_info("Static Tor service onion address: \"%s:%d,%s\"from blob %s base64 %s ",
 						name, DEFAULT_PORT ,fmt_wireaddr(tmpctx, local), blob ,blob64);
 		#else
-		status_info("Static Tor service onion address: \"%s:%d,%s\"",
-						name, DEFAULT_PORT ,fmt_wireaddr(tmpctx, local));
+		status_info("Static Tor service onion address: \"%s:%d,%s\" bound to external port %d ",
+						name, DEFAULT_PORT ,fmt_wireaddr(tmpctx, local), port);
 		#endif
 		discard_remaining_response(rbuf);
 		return onion;
@@ -336,7 +336,7 @@ struct wireaddr *tor_autoservice(const tal_t *ctx,
 
 
 struct wireaddr *tor_fixed_service(const tal_t *ctx,
-				 const struct wireaddr *tor_serviceaddr,
+				 const struct wireaddr_internal *tor_serviceaddr,
 				 const char *tor_password,
 				 const char *blob,
 				 const struct wireaddr *bind,
@@ -350,7 +350,7 @@ struct wireaddr *tor_fixed_service(const tal_t *ctx,
 	char *buffer;
 
 	laddr = bind;
-	ai_tor = wireaddr_to_addrinfo(tmpctx, tor_serviceaddr);
+	ai_tor = wireaddr_to_addrinfo(tmpctx, &tor_serviceaddr->u.torservice.torservice);
 
 	fd = socket(ai_tor->ai_family, SOCK_STREAM, 0);
 	if (fd < 0)
@@ -364,7 +364,7 @@ struct wireaddr *tor_fixed_service(const tal_t *ctx,
 
 	negotiate_auth(&rbuf, tor_password);
 
-	onion = make_fixed_onion(ctx, &rbuf, laddr, blob, DEFAULT_PORT);
+	onion = make_fixed_onion(ctx, &rbuf, laddr, blob, tor_serviceaddr->u.torservice.port);
 	memset((void *)blob, 0, sizeof(*blob));
 	/*on the other hand we can stay connected until ln finish to keep onion alive and then vanish
 	* because when we run with Detach flag as we now do every start of LN creates a new addr while the old

@@ -1184,7 +1184,7 @@ static struct wireaddr_internal *setup_listeners(const tal_t *ctx,
 
 		if (!(proposed_listen_announce[i] & ADDR_ANNOUNCE)) {
 				tor_fixed_service(tmpctx,
-						&proposed_wireaddr[i].u.torservice.torservice,
+						&proposed_wireaddr[i],
 						tor_password,
 						blob,
 						find_local_address(binding),
@@ -1193,7 +1193,7 @@ static struct wireaddr_internal *setup_listeners(const tal_t *ctx,
 		};
 		add_announcable(announcable,
 				tor_fixed_service(tmpctx,
-						&proposed_wireaddr[i].u.torservice.torservice,
+						&proposed_wireaddr[i],
 						tor_password,
 						blob,
 						find_local_address(binding),
