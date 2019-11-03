@@ -67,10 +67,13 @@ static struct connect *find_connect(struct lightningd *ld,
 }
 
 static struct command_result *connect_cmd_succeed(struct command *cmd,
-						  const struct node_id *id)
+						  const struct node_id *id,
+						  const struct wireaddr_internal *addr)
 {
 	struct json_stream *response = json_stream_success(cmd);
 	json_add_node_id(response, "id", id);
+	if (addr != NULL)
+		 json_add_address_internal(response, "address", addr);
 	return command_success(cmd, response);
 }
 
@@ -138,7 +141,7 @@ static struct command_result *json_connect(struct command *cmd,
 
 		if (peer->uncommitted_channel
 		    || (channel && channel->connected)) {
-			return connect_cmd_succeed(cmd, &id);
+			return connect_cmd_succeed(cmd, &id, &peer->addr);
 		}
 	}
 
@@ -254,14 +257,14 @@ static void connect_failed(struct lightningd *ld, const u8 *msg)
 		delay_then_reconnect(channel, seconds_to_delay, addrhint);
 }
 
-void connect_succeeded(struct lightningd *ld, const struct node_id *id)
+void connect_succeeded(struct lightningd *ld, const struct node_id *id, const struct wireaddr_internal *addr)
 {
 	struct connect *c;
 
 	/* We can have multiple connect commands: fail them all */
 	while ((c = find_connect(ld, id)) != NULL) {
 		/* They delete themselves from list */
-		connect_cmd_succeed(c->cmd, id);
+		connect_cmd_succeed(c->cmd, id, addr);
 	}
 }
 

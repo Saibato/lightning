@@ -938,14 +938,14 @@ void peer_connected(struct lightningd *ld, const u8 *msg,
 	per_peer_state_set_fds(hook_payload->pps,
 			       peer_fd, gossip_fd, gossip_store_fd);
 
-	/* Complete any outstanding connect commands. */
-	connect_succeeded(ld, &id);
-
 	/* If we're already dealing with this peer, hand off to correct
 	 * subdaemon.  Otherwise, we'll hand to openingd to wait there. */
 	peer = peer_by_id(ld, &id);
 	if (!peer)
 		peer = new_peer(ld, 0, &id, &hook_payload->addr);
+
+	/* Complete any outstanding connect commands. */
+	connect_succeeded(ld, &id, &peer->addr);
 
 	tal_steal(peer, hook_payload);
 	hook_payload->peer = peer;
