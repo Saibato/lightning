@@ -479,9 +479,9 @@ bool parse_wireaddr_internal(const char *arg, struct wireaddr_internal *addr,
 
 		for (size_t i = 1; i < tal_count(parts)-1; i++) {
 			if (streq(parts[i], "torport")) {
-			char **endp;
-			addr->u.torservice.port = strtol((const char *)parts[i+1], endp, 10);
-				if (addr->u.torservice.port == 0 || endp != '\0') {
+			char *endp = NULL;
+			addr->u.torservice.port = strtol((const char *)parts[i+1], &endp, 10);
+				if (addr->u.torservice.port == 0 || *endp != '\0') {
 					*err_msg = "Bad :torport: number";
 				return false;
 				}
@@ -514,9 +514,9 @@ bool parse_wireaddr_internal(const char *arg, struct wireaddr_internal *addr,
 		char **parts = tal_strsplit(tmpctx, arg, ":", STR_EMPTY_OK);
 		for (size_t i = 1; i < tal_count(parts)-1; i++) {
 			if (streq(parts[i], "torport")) {
-			char **endp;
-			addr->u.torservice.port = strtol((const char *)parts[i+1], endp, 10);
-			if (addr->u.torservice.port == 0 || endp != '\0') {
+			char *endp = NULL;
+			addr->u.torservice.port = strtol((const char *)parts[i+1], &endp, 10);
+			if (addr->u.torservice.port == 0 || *endp != '\0') {
 				*err_msg = "Bad :torport: number";
 				return false;
 			}
