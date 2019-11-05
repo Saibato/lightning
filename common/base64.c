@@ -32,5 +32,6 @@ u8 *b64_decode(const tal_t *ctx, const char *str, size_t len)
 			return tal_free(ret);
 
 	ret[bin_len] = 0; 
+	tal_resize(&ret, bin_len + 1);
 	return ret;
 }
