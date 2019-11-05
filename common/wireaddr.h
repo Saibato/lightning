@@ -126,7 +126,7 @@ struct wireaddr_internal {
 		/* ADDR_INTERNAL_AUTOTOR
 		 * ADDR_INTERNAL_STATICTOR */
 		struct torservice {
-			struct wireaddr torservice;
+			struct wireaddr torservice_address;
 			u16 port;
 			char blob[TOR_V3_BLOBLEN + 1];
 		} torservice;
