@@ -270,7 +270,7 @@ Set an IP address (v4 or v6) or automatic Tor address to listen on and
     your nodes id. You can add the text ':torblob:' followed by up to
     64 Bytes of text to generate from this text a v3 onion service
     address unique to the first 32 bytes of this text. The later 32 bytes
-    will deteremine mainly your Tor onions inner secret but will not
+    will determine mainly your Tor onions inner secret but will not
     change the text of the base32 encoded tor address.
     Those remaining 32 bytes should and can be randomly selected.
     at startup. The text of the onion address is detremined by
