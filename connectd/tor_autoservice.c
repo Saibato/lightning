@@ -161,7 +161,7 @@ static struct wireaddr *make_fixed_onion(const tal_t *ctx,
 	char *blob64;
 
 
-	blob64 = b64_encode(tmpctx,(char *) blob, 64);
+	blob64 = b64_encode(tmpctx,(const u8 *) blob, 64);
 
 	tor_send_cmd(rbuf,
 			  tal_fmt(tmpctx, "ADD_ONION ED25519-V3:%s Port=%d,%s Flags=DiscardPK",
