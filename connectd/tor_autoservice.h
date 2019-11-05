@@ -19,4 +19,8 @@ struct wireaddr *tor_fixed_service(const tal_t *ctx,
 				 const struct wireaddr *bind,
 				 const u8 index);
 
+const struct wireaddr *
+find_local_address(const struct wireaddr_internal *bindings);
+
+
 #endif /* LIGHTNING_CONNECTD_TOR_AUTOSERVICE_H */

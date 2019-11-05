@@ -988,23 +988,6 @@ static void finalize_announcable(struct wireaddr **announcable)
 	}
 }
 
-
-static const struct wireaddr *
-find_local_address(const struct wireaddr_internal *bindings)
-{
-	for (size_t i = 0; i < tal_count(bindings); i++) {
-		if (bindings[i].itype != ADDR_INTERNAL_WIREADDR)
-			continue;
-		if (bindings[i].u.wireaddr.type != ADDR_TYPE_IPV4
-		    && bindings[i].u.wireaddr.type != ADDR_TYPE_IPV6)
-			continue;
-		return &bindings[i].u.wireaddr;
-	}
-	status_failed(STATUS_FAIL_INTERNAL_ERROR,
-		      "No local address found to tell Tor to connect to");
-}
-
-
 /*~ The user can specify three kinds of addresses: ones we bind to but don't
  * announce, ones we announce but don't bind to, and ones we bind to and
  * announce if they seem to be public addresses.
