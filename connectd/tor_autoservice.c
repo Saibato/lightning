@@ -280,7 +280,7 @@ static void negotiate_auth(struct rbuf *rbuf, const char *tor_password)
 }
 
 /* We need to have a bound address we can tell Tor to connect to */
-static const struct wireaddr *
+const struct wireaddr *
 find_local_address(const struct wireaddr_internal *bindings)
 {
 	for (size_t i = 0; i < tal_count(bindings); i++) {
