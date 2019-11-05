@@ -307,9 +307,8 @@ struct wireaddr *tor_autoservice(const tal_t *ctx,
 	char *buffer;
 
 	laddr = find_local_address(bindings);
-
 	ai_tor = wireaddr_to_addrinfo(tmpctx, &tor_serviceaddr->u.torservice.torservice_address);
- 
+
 	fd = socket(ai_tor->ai_family, SOCK_STREAM, 0);
 	if (fd < 0)
 		err(1, "Creating stream socket for Tor");
