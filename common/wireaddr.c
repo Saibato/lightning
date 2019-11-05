@@ -522,7 +522,7 @@ bool parse_wireaddr_internal(const char *arg, struct wireaddr_internal *addr,
 			}
 
         } else if (streq(parts[i], "torblob")) {
-					strncpy(&(addr->u.torservice.blob[0]), (const char *)parts[i+1], TOR_V3_BLOBLEN);
+					strncpy((char *)&(addr->u.torservice.blob[0]), (const char *)parts[i+1], TOR_V3_BLOBLEN);
 
 					if (strlen((char *)parts[i+1]) == 0) {
 						if (err_msg)
@@ -535,7 +535,7 @@ bool parse_wireaddr_internal(const char *arg, struct wireaddr_internal *addr,
 
 	if (use_magic_blob) {
 	/* when statictor called just with the service address and or port generate the unique onion */
-		strncpy(&(addr->u.torservice.blob[0]), tal_fmt(tmpctx, STATIC_TOR_MAGIC_STRING), strlen(STATIC_TOR_MAGIC_STRING));
+		strncpy((char *)&(addr->u.torservice.blob[0]), tal_fmt(tmpctx, STATIC_TOR_MAGIC_STRING), strlen(STATIC_TOR_MAGIC_STRING));
 	}
 
 	/* handle ipv6 dots :: */

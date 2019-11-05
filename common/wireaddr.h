@@ -128,7 +128,7 @@ struct wireaddr_internal {
 		struct torservice {
 			struct wireaddr torservice_address;
 			u16 port;
-			char blob[TOR_V3_BLOBLEN + 1];
+			u8 blob[TOR_V3_BLOBLEN + 1];
 		} torservice;
 		/* ADDR_INTERNAL_FORPROXY */
 		struct unresolved {
