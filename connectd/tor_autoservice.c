@@ -160,18 +160,17 @@ static struct wireaddr *make_fixed_onion(const tal_t *ctx,
 	struct wireaddr *onion;
 	char *blob64;
 
-
 	blob64 = b64_encode(tmpctx,(const u8 *) blob, 64);
 
 	tor_send_cmd(rbuf,
 			  tal_fmt(tmpctx, "ADD_ONION ED25519-V3:%s Port=%d,%s Flags=DiscardPK",
 					blob64, port, fmt_wireaddr(tmpctx, local)));
 
-	while ((line = tor_response_line_wfail(rbuf)) != NULL) {
+	while ((line = tor_response_line_wfail(rbuf))) {
 		const char *name;
 		if (line && strstarts(line, "Onion address collision"))
 			status_failed(STATUS_FAIL_INTERNAL_ERROR,
-				      "Tor address in use\n");
+				      "Tor address in use");
 
 		if (!strstarts(line, "ServiceID="))
 			continue;
@@ -196,8 +195,6 @@ static struct wireaddr *make_fixed_onion(const tal_t *ctx,
 		return onion;
 	}
 	return NULL;
-	status_failed(STATUS_FAIL_INTERNAL_ERROR,
-		      "Tor didn't give us a ServiceID");
 }
 
 /* https://gitweb.torproject.org/torspec.git/tree/control-spec.txt:
