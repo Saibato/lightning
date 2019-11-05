@@ -347,7 +347,7 @@ struct wireaddr *tor_fixed_service(const tal_t *ctx,
 	char *buffer;
 
 	laddr = bind;
-	ai_tor = wireaddr_to_addrinfo(tmpctx, &tor_serviceaddr->u.torservice.torservice);
+	ai_tor = wireaddr_to_addrinfo(tmpctx, &tor_serviceaddr->u.torservice.torservice_address);
 
 	fd = socket(ai_tor->ai_family, SOCK_STREAM, 0);
 	if (fd < 0)
