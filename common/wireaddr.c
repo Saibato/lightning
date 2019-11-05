@@ -472,9 +472,9 @@ bool parse_wireaddr_internal(const char *arg, struct wireaddr_internal *addr,
 	}
 
 	if (strstarts(arg, "autotor:")) {
-		/* Format is separated by colons. */
 		addr->itype = ADDR_INTERNAL_AUTOTOR;
 		addr->u.torservice.port = DEFAULT_PORT;
+		/* Format is separated by colons. */
 		char **parts = tal_strsplit(tmpctx, arg, ":", STR_EMPTY_OK);
 
 		for (size_t i = 1; i < tal_count(parts)-1; i++) {
@@ -505,13 +505,13 @@ bool parse_wireaddr_internal(const char *arg, struct wireaddr_internal *addr,
 	}
 
 	if (strstarts(arg, "statictor:")) {
-		/* Format is separated by colons. */
+		bool use_magic_blob = true;
 		addr->itype = ADDR_INTERNAL_STATICTOR;
 		addr->u.torservice.port = DEFAULT_PORT;
 		memset(&(addr->u.torservice.blob[0]), 0, sizeof(addr->u.torservice.blob));
-		bool use_magic_blob = true;
-		char **parts = tal_strsplit(tmpctx, arg, ":", STR_EMPTY_OK);
 
+		/* Format is separated by colons. */
+		char **parts = tal_strsplit(tmpctx, arg, ":", STR_EMPTY_OK);
 		for (size_t i = 1; i < tal_count(parts)-1; i++) {
 			if (streq(parts[i], "torport")) {
 			char **endp;
