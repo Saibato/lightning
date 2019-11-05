@@ -1172,6 +1172,9 @@ static struct wireaddr_internal *setup_listeners(const tal_t *ctx,
 							blob,
 							find_local_address(binding),
 							0);
+		/* get rid of rest of blob data on our side of tor */
+		memset((void *)blob, 0, 64);
+
 		if (!(proposed_listen_announce[i] & ADDR_ANNOUNCE)) {
 				continue;
 		};
