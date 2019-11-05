@@ -93,7 +93,8 @@ static void discard_remaining_response(struct rbuf *rbuf)
 static struct wireaddr *make_onion(const tal_t *ctx,
 				   struct rbuf *rbuf,
 				   const struct wireaddr *local,
-				   bool use_v3_autotor)
+				   bool use_v3_autotor,
+				   u16 port)
 {
 	char *line;
 	struct wireaddr *onion;
@@ -121,12 +122,12 @@ static struct wireaddr *make_onion(const tal_t *ctx,
 		tor_send_cmd(rbuf,
 		     tal_fmt(tmpctx, "ADD_ONION NEW:RSA1024 Port=%d,%s Flags=DiscardPK,Detach",
 			     /* FIXME: We *could* allow user to set Tor port */
-			     DEFAULT_PORT, fmt_wireaddr(tmpctx, local)));
+			     port, fmt_wireaddr(tmpctx, local)));
 	} else {
 		tor_send_cmd(rbuf,
 		     tal_fmt(tmpctx, "ADD_ONION NEW:ED25519-V3 Port=%d,%s Flags=DiscardPK,Detach",
 			     /* FIXME: We *could* allow user to set Tor port */
-			     DEFAULT_PORT, fmt_wireaddr(tmpctx, local)));
+			     port, fmt_wireaddr(tmpctx, local)));
 	}
 
 	while ((line = tor_response_line(rbuf)) != NULL) {
@@ -141,10 +142,10 @@ static struct wireaddr *make_onion(const tal_t *ctx,
 
 		name = tal_fmt(tmpctx, "%s.onion", line);
 		onion = tal(ctx, struct wireaddr);
-		if (!parse_wireaddr(name, onion, DEFAULT_PORT, false, NULL))
+		if (!parse_wireaddr(name, onion, local->port, false, NULL))
 			status_failed(STATUS_FAIL_INTERNAL_ERROR,
 				      "Tor gave bad onion name '%s'", name);
-		status_info("New autotor service onion address: \"%s:%d\"", name, DEFAULT_PORT);
+		status_info("New autotor service onion address: \"%s:%d\" bound from extern port:%d", name, local->port, port);
 		discard_remaining_response(rbuf);
 		return onion;
 	}
@@ -188,7 +189,7 @@ static struct wireaddr *make_fixed_onion(const tal_t *ctx,
 		 status_info("Static Tor service onion address: \"%s:%d,%s\"from blob %s base64 %s ",
 						name, DEFAULT_PORT ,fmt_wireaddr(tmpctx, local), blob ,blob64);
 		#else
-		status_info("Static Tor service onion address: \"%s:%d,%s\" bound to external port %d ",
+		status_info("Static Tor service onion address: \"%s:%d,%s\" bound from extern port %d ",
 						name, DEFAULT_PORT ,fmt_wireaddr(tmpctx, local), port);
 		#endif
 		discard_remaining_response(rbuf);
@@ -293,7 +294,7 @@ find_local_address(const struct wireaddr_internal *bindings)
 }
 
 struct wireaddr *tor_autoservice(const tal_t *ctx,
-				 const struct wireaddr *tor_serviceaddr,
+				 const struct wireaddr_internal *tor_serviceaddr,
 				 const char *tor_password,
 				 const struct wireaddr_internal *bindings,
 				 const bool use_v3_autotor)
@@ -306,8 +307,9 @@ struct wireaddr *tor_autoservice(const tal_t *ctx,
 	char *buffer;
 
 	laddr = find_local_address(bindings);
-	ai_tor = wireaddr_to_addrinfo(tmpctx, tor_serviceaddr);
 
+	ai_tor = wireaddr_to_addrinfo(tmpctx, &tor_serviceaddr->u.torservice.torservice_address);
+ 
 	fd = socket(ai_tor->ai_family, SOCK_STREAM, 0);
 	if (fd < 0)
 		err(1, "Creating stream socket for Tor");
@@ -319,7 +321,7 @@ struct wireaddr *tor_autoservice(const tal_t *ctx,
 	rbuf_init(&rbuf, fd, buffer, tal_count(buffer), buf_resize);
 
 	negotiate_auth(&rbuf, tor_password);
-	onion = make_onion(ctx, &rbuf, laddr, use_v3_autotor);
+	onion = make_onion(ctx, &rbuf, laddr, use_v3_autotor, tor_serviceaddr->u.torservice.port);
 
 	/*on the other hand we can stay connected until ln finish to keep onion alive and then vanish */
 	//because when we run with Detach flag as we now do every start of LN creates a new addr while the old

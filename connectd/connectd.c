@@ -1127,7 +1127,7 @@ static struct wireaddr_internal *setup_listeners(const tal_t *ctx,
 		if (proposed_wireaddr[i].itype != ADDR_INTERNAL_AUTOTOR)
 			continue;
 		toraddr = tor_autoservice(tmpctx,
-						&proposed_wireaddr[i].u.torservice.torservice_address,
+						&proposed_wireaddr[i],
 						tor_password,
 						binding,
 						daemon->use_v3_autotor);

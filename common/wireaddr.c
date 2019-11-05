@@ -85,6 +85,7 @@ void towire_wireaddr_internal(u8 **pptr, const struct wireaddr_internal *addr)
 		return;
 	case ADDR_INTERNAL_AUTOTOR:
 		towire_wireaddr(pptr, &addr->u.torservice.torservice_address);
+		towire_u16(pptr, addr->u.torservice.port);
 		return;
 	case ADDR_INTERNAL_STATICTOR:
 		towire_wireaddr(pptr, &addr->u.torservice.torservice_address);
@@ -124,6 +125,7 @@ bool fromwire_wireaddr_internal(const u8 **cursor, size_t *max,
 		return *cursor != NULL;
 	case ADDR_INTERNAL_AUTOTOR:
 		fromwire_wireaddr(cursor, max, &addr->u.torservice.torservice_address);
+		addr->u.torservice.port = fromwire_u16(cursor, max);
 		return *cursor != NULL;
 	case ADDR_INTERNAL_STATICTOR:
 		fromwire_wireaddr(cursor, max, &addr->u.torservice.torservice_address);
@@ -469,14 +471,34 @@ bool parse_wireaddr_internal(const char *arg, struct wireaddr_internal *addr,
 	}
 
 	/* 'autotor:' is a special prefix meaning talk to Tor to create
-	 * an onion address. */
+	 * an onion address from a blob. */
+	if (strstarts(arg, "autotor:") &&
+		(strstr(arg, ":torport:"))) {
+		addr->itype = ADDR_INTERNAL_AUTOTOR;
+		char *temp = tal_fmt(tmpctx , "%.6s", strstr(arg, ":torport:") + strlen(":torport:"));
+		addr->u.torservice.port = atoi(temp);
+		if (strlen(temp) == 0) {
+			if (err_msg)
+			*err_msg = "port string too short";
+			return false;
+		}
+		temp = tal_fmt(tmpctx, "%s", arg + strlen("autotor:"));
+		*(strstr(temp, ":torport:")) = '\0';
+		return parse_wireaddr(temp,
+				      &addr->u.torservice.torservice_address, 9051,
+				      dns_ok ? NULL : &needed_dns,
+				      err_msg);
+	}
+
 	if (strstarts(arg, "autotor:")) {
 		addr->itype = ADDR_INTERNAL_AUTOTOR;
+		addr->u.torservice.port = DEFAULT_PORT;
 		return parse_wireaddr(arg + strlen("autotor:"),
 				      &addr->u.torservice.torservice_address, 9051,
 				      dns_ok ? NULL : &needed_dns,
 				      err_msg);
 	}
+
 
 	/* 'statictor:' is a special prefix meaning talk to Tor to create
 	 * an onion address. */
