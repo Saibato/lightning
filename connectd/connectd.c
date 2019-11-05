@@ -1012,6 +1012,7 @@ static struct wireaddr_internal *setup_listeners(const tal_t *ctx,
 	const char *blob = NULL;
 	struct secret random;
 	struct pubkey pb;
+	struct wireaddr *toraddr;
 
 	/* Start with empty arrays, for tal_arr_expand() */
 	binding = tal_arr(ctx, struct wireaddr_internal, 0);
@@ -1125,20 +1126,16 @@ static struct wireaddr_internal *setup_listeners(const tal_t *ctx,
 			continue;
 		if (proposed_wireaddr[i].itype != ADDR_INTERNAL_AUTOTOR)
 			continue;
-		if (!(proposed_listen_announce[i] & ADDR_ANNOUNCE)) {
-				tor_autoservice(tmpctx,
+		toraddr = tor_autoservice(tmpctx,
 						&proposed_wireaddr[i].u.torservice.torservice,
 						tor_password,
 						binding,
 						daemon->use_v3_autotor);
+
+		if (!(proposed_listen_announce[i] & ADDR_ANNOUNCE)) {
 			continue;
 		};
-		add_announcable(announcable,
-				tor_autoservice(tmpctx,
-						&proposed_wireaddr[i].u.torservice.torservice,
-						tor_password,
-						binding,
-						daemon->use_v3_autotor));
+		add_announcable(announcable, toraddr);
 	}
 
 	/* Now we have bindings, set up any Tor static addresses: we will point
@@ -1165,28 +1162,23 @@ static struct wireaddr_internal *setup_listeners(const tal_t *ctx,
 		} else status_failed(STATUS_FAIL_INTERNAL_ERROR,
 							"Could not get the secret for our node id from hsm");
 
+		/* clear our temp buffers */
+		sodium_munlock(&random, sizeof(random));
+		memset((void *)&pb, 0, sizeof(pb));
+
+		toraddr = tor_fixed_service(tmpctx,
+							&proposed_wireaddr[i],
+							tor_password,
+							blob,
+							find_local_address(binding),
+							0);
 		if (!(proposed_listen_announce[i] & ADDR_ANNOUNCE)) {
-				tor_fixed_service(tmpctx,
-						&proposed_wireaddr[i],
-						tor_password,
-						blob,
-						find_local_address(binding),
-						0);
 				continue;
 		};
-		add_announcable(announcable,
-				tor_fixed_service(tmpctx,
-						&proposed_wireaddr[i],
-						tor_password,
-						blob,
-						find_local_address(binding),
-						0));
+		add_announcable(announcable, toraddr);
 	}
 	/* Sort and uniquify. */
 	finalize_announcable(announcable);
-
-	memset((void *)&random, 0, sizeof(random));
-	memset((void *)&pb, 0, sizeof(pb));
 
 	return binding;
 }
