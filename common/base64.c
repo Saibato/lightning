@@ -8,27 +8,30 @@
 
 char *b64_encode(const tal_t *ctx, const u8 *data, size_t len)
 {
-	char *str = tal_arrz(ctx, char, sodium_base64_encoded_len(len, sodium_base64_VARIANT_ORIGINAL) + 1);
+	char *str = tal_arr(ctx, char, sodium_base64_encoded_len(len, sodium_base64_VARIANT_ORIGINAL) + 1);
 
-	str = sodium_bin2base64(str,  tal_count(str), (const unsigned char *)data,
+	str = sodium_bin2base64(str,  tal_count(str), data,
 								len, sodium_base64_VARIANT_ORIGINAL);
 	return str;
 }
 
-char *b64_decode(const tal_t *ctx, char *str, size_t len)
+u8 *b64_decode(const tal_t *ctx, const char *str, size_t len)
 {
-	char *ret = tal_arrz(ctx, char, strlen(str) + 1);
-	const char *b64_end;
+	size_t bin_len = len + 1;
 
-	if (!sodium_base642bin((unsigned char * const )ret,
+	u8 *ret = tal_arrz(ctx, u8, bin_len);
+
+	if (!sodium_base642bin(ret,
 				tal_count(ret),
 				(const char * const)str,
 				len,
 				NULL,
+				&bin_len,
 				NULL,
-				&b64_end,
 				sodium_base64_VARIANT_ORIGINAL))
 			return tal_free(ret);
 
+	ret[bin_len] = 0; 
+	tal_resize(&ret, bin_len + 1);
 	return ret;
 }
