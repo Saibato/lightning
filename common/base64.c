@@ -31,7 +31,7 @@ u8 *b64_decode(const tal_t *ctx, const char *str, size_t len)
 				sodium_base64_VARIANT_ORIGINAL))
 			return tal_free(ret);
 
-	ret[bin_len] = 0; 
+	ret[bin_len] = 0;
 	tal_resize(&ret, bin_len + 1);
 	return ret;
 }
