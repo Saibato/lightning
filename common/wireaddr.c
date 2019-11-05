@@ -471,6 +471,8 @@ bool parse_wireaddr_internal(const char *arg, struct wireaddr_internal *addr,
 		return true;
 	}
 
+	/* 'autotor:' is a special prefix meaning talk to Tor to create
+	 * an onion address. */
 	if (strstarts(arg, "autotor:")) {
 		addr->itype = ADDR_INTERNAL_AUTOTOR;
 		addr->u.torservice.port = DEFAULT_PORT;
@@ -504,6 +506,9 @@ bool parse_wireaddr_internal(const char *arg, struct wireaddr_internal *addr,
 				      err_msg);
 	}
 
+
+	/* 'statictor:' is a special prefix meaning talk to Tor to create
+	 * an static onion address from a blob or node id */
 	if (strstarts(arg, "statictor:")) {
 		bool use_magic_blob = true;
 		addr->itype = ADDR_INTERNAL_STATICTOR;
@@ -532,12 +537,10 @@ bool parse_wireaddr_internal(const char *arg, struct wireaddr_internal *addr,
 					use_magic_blob = false;
 				}
 		}
-
 	if (use_magic_blob) {
 	/* when statictor called just with the service address and or port generate the unique onion */
 		strncpy((char *)&(addr->u.torservice.blob[0]), tal_fmt(tmpctx, STATIC_TOR_MAGIC_STRING), strlen(STATIC_TOR_MAGIC_STRING));
 	}
-
 	/* handle ipv6 dots :: */
 	char *temp;
 	if (strstr(parts[1],"[")) {
