@@ -275,6 +275,9 @@ Set an IP address (v4 or v6) or automatic Tor address to listen on and
     Those remaining 32 bytes should and can but must not be randomly selected.
     at startup. The text of the onion address is determined by
     the first 32 bytes of the blob.
+    You can also use an postfix ':torport:TORPORT' to select the external
+    tor binding. The result is that over tor your node is accessible by a port
+    defined by you and possible different from your local node port assignment
 
     This option can be used multiple times to add more addresses, and
     its use disables autolisten.  If necessary, and 'always-use-proxy'
