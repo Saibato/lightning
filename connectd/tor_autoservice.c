@@ -187,10 +187,10 @@ static struct wireaddr *make_fixed_onion(const tal_t *ctx,
 				      "Tor gave bad onion name '%s'", name);
 		#ifdef SUPERVERBOSE
 		 status_info("Static Tor service onion address: \"%s:%d,%s\"from blob %s base64 %s ",
-						name, DEFAULT_PORT ,fmt_wireaddr(tmpctx, local), blob ,blob64);
+						name, port ,fmt_wireaddr(tmpctx, local), blob ,blob64);
 		#else
 		status_info("Static Tor service onion address: \"%s:%d,%s\" bound from extern port %d ",
-						name, DEFAULT_PORT ,fmt_wireaddr(tmpctx, local), port);
+						name, port ,fmt_wireaddr(tmpctx, local), port);
 		#endif
 		discard_remaining_response(rbuf);
 		return onion;
