@@ -267,12 +267,15 @@ static char *opt_add_proxy_addr(const char *arg, struct lightningd *ld)
 {
 	bool needed_dns = false;
 	tal_free(ld->proxyaddr);
+	/* We set use_proxy_always true to prevent dns leak by default */
+	/* The user can overide this by --always-use-proxy=false after the --proxy cmd */
+	ld->use_proxy_always = true;
 
 	/* We use a tal_arr here, so we can marshal it to gossipd */
 	ld->proxyaddr = tal_arr(ld, struct wireaddr, 1);
 
 	if (!parse_wireaddr(arg, ld->proxyaddr, 9050,
-			    ld->use_proxy_always ? &needed_dns : NULL,
+			    &needed_dns,
 			    NULL)) {
 		return tal_fmt(NULL, "Unable to parse Tor proxy address '%s' %s",
 			       arg, needed_dns ? " (needed dns)" : "");
@@ -815,7 +818,7 @@ static void register_opts(struct lightningd *ld)
 			 &ld->autolisten,
 			 "If true, listen on default port and announce if it seems to be a public interface");
 
-	opt_register_arg("--proxy", opt_add_proxy_addr, NULL,
+	opt_register_early_arg("--proxy", opt_add_proxy_addr, NULL,
 			ld,"Set a socks v5 proxy IP address and port");
 	opt_register_arg("--tor-service-password", opt_set_talstr, NULL,
 			 &ld->tor_service_password,
