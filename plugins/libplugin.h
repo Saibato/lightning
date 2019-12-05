@@ -53,9 +53,9 @@ struct plugin_notification {
 /* Create an array of these, one for each hook you subscribe to. */
 struct plugin_hook {
 	const char *name;
-	struct command_result (*handle)(struct command *cmd,
-	                                const char *buf,
-	                                const jsmntok_t *params);
+	struct command_result *(*handle)(struct command *cmd,
+	                                 const char *buf,
+	                                 const jsmntok_t *params);
 };
 
 /* Helper to create a zero or single-value JSON object; if @str is NULL,
