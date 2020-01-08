@@ -33,6 +33,33 @@
 /* some crufts can not forward ipv6*/
 #undef BIND_FIRST_TO_IPV6
 
+static char *for_most_humans_readable_tor_socks5_response(const tal_t *ctx, u8 return_code)
+{
+	switch (return_code) {
+		case 0x00:
+			return tal_strdup(ctx, "Connection is not accepted");
+		case 0x01:
+			return tal_strdup(ctx, "General SOCKS server failure");
+		case 0x02:
+			return tal_strdup(ctx, "Connection not allowed by ruleset");
+		case 0x03:
+			return tal_strdup(ctx, "Network is unreachable");
+		case 0x04:
+			return tal_strdup(ctx, "Host is unreachable");
+		case 0x05:
+			return tal_strdup(ctx, "Connection is refused");
+		case 0x06:
+			return tal_strdup(ctx, "TTL has expired");
+		case 0x07:
+			return tal_strdup(ctx, "Command is not supported");
+		case 0x08:
+			return tal_strdup(ctx, "Address type is not supported");
+		default:
+		/* opps we wish to never read this in the logs */
+			return tal_strdup(ctx, "Unknown error");
+	}
+}
+
 struct connecting_socks {
 	u8 buffer[MAX_SIZE_OF_SOCKS5_REQ_OR_RESP];
 	size_t hlen;
@@ -72,14 +99,24 @@ static struct io_plan *connect_finish(struct io_conn *conn,
 				     connect->host);
 			return connection_out(conn, connect->connect);
 		} else {
+			/* Even tor socks code states can this ever happen?
+			 * at least dump the hex return code to logs
+			*/
 			status_debug
-			    ("Tor connect out for host %s error invalid type return ",
-			     connect->host);
+			    ("Tor connect out for host %s error ignored response invalid response type %0x returned",
+			     connect->host,
+			     connect->buffer[3]);
+			/* Since we do not write any more, we do not need to sync_flush to consume bytes
+			 * we just close
+			*/
 			return io_close(conn);
 		}
 	} else {
-		status_debug("Tor connect out for host %s error: %x ",
-			     connect->host, connect->buffer[1]);
+		/* The tor socks5 proxy returned an error dump the errorcode and readable string */
+		status_debug("Tor connect out for host %s error: %0x - %s",
+			     connect->host,
+			     connect->buffer[1],
+			     for_most_humans_readable_tor_socks5_response(tmpctx, connect->buffer[1]));
 		return io_close(conn);
 	}
 }
@@ -103,26 +140,34 @@ static struct io_plan *io_tor_connect_after_resp_to_connect(struct io_conn
 	status_io(LOG_IO_IN, NULL, "proxy", connect->buffer, 2);
 
 	if (connect->buffer[1] == SOCKS_ERROR) {
-		status_debug("Connected out for %s error", connect->host);
+		status_debug("Connected out for %s error: the tor socks server does not understand our connect method",
+			     connect->host);
 		return io_close(conn);
 	}
-	/* make the V5 request */
-	connect->hlen = strlen(connect->host);
-	connect->buffer[0] = SOCKS_V5;
-	connect->buffer[1] = SOCKS_CONNECT;
-	connect->buffer[2] = 0;
-	connect->buffer[3] = SOCKS_DOMAIN;
-	connect->buffer[4] = connect->hlen;
+	if (connect->buffer[1] == '\0') {
+		/* make the V5 request */
+		connect->hlen = strlen(connect->host);
+		connect->buffer[0] = SOCKS_V5;
+		connect->buffer[1] = SOCKS_CONNECT;
+		connect->buffer[2] = 0;
+		connect->buffer[3] = SOCKS_DOMAIN;
+		connect->buffer[4] = connect->hlen;
 
-	memcpy(connect->buffer + SOCK_REQ_V5_LEN, connect->host, connect->hlen);
-	memcpy(connect->buffer + SOCK_REQ_V5_LEN + strlen(connect->host),
-	       &(connect->port), sizeof connect->port);
+		memcpy(connect->buffer + SOCK_REQ_V5_LEN, connect->host, connect->hlen);
+		memcpy(connect->buffer + SOCK_REQ_V5_LEN + strlen(connect->host),
+				&(connect->port), sizeof connect->port);
 
-	status_io(LOG_IO_OUT, NULL, "proxy", connect->buffer,
-		  SOCK_REQ_V5_HEADER_LEN + connect->hlen);
-	return io_write(conn, connect->buffer,
-			SOCK_REQ_V5_HEADER_LEN + connect->hlen,
-			connect_out, connect);
+		status_io(LOG_IO_OUT, NULL, "proxy", connect->buffer,
+				SOCK_REQ_V5_HEADER_LEN + connect->hlen);
+		return io_write(conn, connect->buffer,
+				SOCK_REQ_V5_HEADER_LEN + connect->hlen,
+				connect_out, connect);
+	} else {
+		status_debug("Connected out for %s error: unexpected connect answer %0x from the tor socks5 proxy",
+				connect->host,
+				connect->buffer[1]);
+		return io_close(conn);
+	}
 }
 
 static struct io_plan *io_tor_connect_after_req_to_connect(struct io_conn *conn,
