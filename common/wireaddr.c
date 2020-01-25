@@ -543,6 +543,18 @@ bool parse_wireaddr_internal(const char *arg, struct wireaddr_internal *addr,
 				use_magic_blob = false;
 				}
 			}
+			if (tal_strreg(tmpctx, parts[i], "torblob_from_entropy")) {
+				char **parts_eq = tal_strsplit(tmpctx, parts[i], "=", STR_EMPTY_OK);
+				if (tal_count(parts_eq) == 3) {
+					if (strlen((char *)parts_eq[1]) == 0) {
+						if (err_msg)
+							*err_msg = "entropy too short";
+						return false;
+					}
+				strncpy((char *)&(addr->u.torservice.blob[0]), tal_fmt(tmpctx,"%s%s", STATIC_TOR_MAGIC_STRING_ENTR, (const char *)parts_eq[1]), TOR_V3_BLOBLEN);
+				use_magic_blob = false;
+				}
+			}
 		}
 
 	if (use_magic_blob) {
