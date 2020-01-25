@@ -1163,6 +1163,31 @@ static struct wireaddr_internal *setup_listeners(const tal_t *ctx,
 			} else status_failed(STATUS_FAIL_INTERNAL_ERROR,
 							"Could not get the pub of our node id from hsm");
 		}
+		if (strstarts((char *)proposed_wireaddr[i].u.torservice.blob, STATIC_TOR_MAGIC_STRING_ENTR)) {
+			if (pubkey_from_node_id(&pb, &daemon->id)) {
+				if (sodium_mlock(&random, sizeof(random)) != 0)
+						status_failed(STATUS_FAIL_INTERNAL_ERROR,
+									"Could not lock the random prf key memory.");
+				randombytes_buf((void * const)&random, 32);
+				/* generate static tor node address, take first 32 bytes from secret of node_id plus 32 random bytes from sodiom
+				 * sha in 32 bytes of the torentr as entopy
+				 */
+				struct sha256_ctx sctx = SHA256_INIT;
+				struct sha256_double shad;
+				sha256_update(&sctx, hsm_do_ecdh(tmpctx, &pb), 32);
+				/* sha sha the entropy */
+				sha256_update(&sctx, &proposed_wireaddr[i].u.torservice.blob[strlen(STATIC_TOR_MAGIC_STRING_ENTR)], 32);
+				sha256_double_done(&sctx, &shad);
+				/* even if it's a secret pub derived, tor shall see only the double sha */
+				memcpy((void *)&blob[0], &shad, 32);
+				memcpy((void *)&blob[32], &random, 32);
+				/* clear our temp buffer, don't leak by extern libs core-dumps, our blob we/tal handle later */
+				sodium_munlock(&random, sizeof(random));
+
+			} else status_failed(STATUS_FAIL_INTERNAL_ERROR,
+							"Could not get the pub of our node id from hsm");
+		}
+
 
 		toraddr = tor_fixed_service(tmpctx,
 					    &proposed_wireaddr[i],
