@@ -160,7 +160,6 @@ static struct wireaddr *make_fixed_onion(const tal_t *ctx,
 	char *line;
 	struct wireaddr *onion;
 	char *blob64;
-
 	blob64 = b64_encode(tmpctx, blob, 64);
 
 	tor_send_cmd(rbuf,
@@ -187,7 +186,7 @@ static struct wireaddr *make_fixed_onion(const tal_t *ctx,
 				      "Tor gave bad onion name '%s'", name);
 		#ifdef SUPERVERBOSE
 		 status_info("Static Tor service onion address: \"%s:%d,%s\"from blob %s base64 %s ",
-						name, port ,fmt_wireaddr(tmpctx, local), blob ,blob64);
+						name, port ,fmt_wireaddr(tmpctx, local), tal_hex(tempctx, blob) ,blob64);
 		#else
 		status_info("Static Tor service onion address: \"%s:%d,%s\" bound from extern port %d ",
 						name, port ,fmt_wireaddr(tmpctx, local), port);

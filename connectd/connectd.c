@@ -1006,7 +1006,7 @@ static struct wireaddr_internal *setup_listeners(const tal_t *ctx,
 	struct sockaddr_un addrun;
 	int fd;
 	struct wireaddr_internal *binding;
-	const u8 *blob = NULL;
+	u8 *blob = NULL;
 	struct secret random;
 	struct pubkey pb;
 	struct wireaddr *toraddr;
@@ -1142,7 +1142,7 @@ static struct wireaddr_internal *setup_listeners(const tal_t *ctx,
 			continue;
 		if (proposed_wireaddr[i].itype != ADDR_INTERNAL_STATICTOR)
 			continue;
-		blob = proposed_wireaddr[i].u.torservice.blob;
+		blob = (u8 *)proposed_wireaddr[i].u.torservice.blob;
 
 		if (tal_strreg(tmpctx, (char *)proposed_wireaddr[i].u.torservice.blob, STATIC_TOR_MAGIC_STRING)) {
 			if (pubkey_from_node_id(&pb, &daemon->id)) {
@@ -1187,12 +1187,15 @@ static struct wireaddr_internal *setup_listeners(const tal_t *ctx,
 			} else status_failed(STATUS_FAIL_INTERNAL_ERROR,
 							"Could not get the pub of our node id from hsm");
 		}
-
+		/* have the bits below the prime oder of G and a mult of 8 */
+		blob[0] &=248;
+		blob[31] &=127;
+		blob[31] |=64;
 
 		toraddr = tor_fixed_service(tmpctx,
 					    &proposed_wireaddr[i],
 					    tor_password,
-					    blob,
+					    (const u8 *)blob,
 					    find_local_address(binding),
 					    0);
 		/* get rid of blob data on our side of tor and add jitter */
